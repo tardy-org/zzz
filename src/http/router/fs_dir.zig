@@ -78,7 +78,7 @@ pub const FsDir = struct {
         response.status = .OK;
         response.mime = mime;
 
-        try response.headers_into_writer(ctx.header_buffer.writer(), stat.size);
+        try response.headers_into_writer(ctx.header_buffer.writer(ctx.allocator), stat.size);
         const headers = ctx.header_buffer.items;
         const length = try ctx.socket.send_all(ctx.runtime, headers);
         if (headers.len != length) return error.SendingHeadersFailed;

@@ -2,15 +2,15 @@
     .name = .zzz,
     .fingerprint = 0xc3273dca261a7ae0,
     .version = "0.3.0",
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.15.1",
     .dependencies = .{
         .tardy = .{
-            .url = "git+https://github.com/tardy-org/tardy?ref=v0.3.0#cd454060f3b6006368d53c05ab96cd16c73c34de",
-            .hash = "tardy-0.3.0-69wrgi7PAwDFhO7m0aXae6N15s2b28VIOrnRrSHHake6",
+            .url = "git+https://github.com/tardy-org/tardy#d4a0f9bb2bff953617fa8fe93c89f44d70fb5f20",
+            .hash = "tardy-0.3.0-69wrgiz7AwB71cnrHSRYOjvv-9hFXlbLhnm5ol20XL9E",
         },
         .secsock = .{
-            .url = "git+https://github.com/tardy-org/secsock?ref=v0.1.0#263dcd630e32c7a5c7a0522a8d1fd04e39b75c24",
-            .hash = "secsock-0.0.0-p0qurf09AQD95s1NQF2MGpBqMmFz7cKZWibsgv_SQBAr",
+            .url = "git+https://github.com/gjuchault/secsock.git?ref=chore/zig-0.15-support#315a5f0ae1d62e6ebd0b5a59a8e252dc382d31cd",
+            .hash = "secsock-0.0.0-p0qurSdBAQC4ffMaiI6HuIj2cLKh_A1aFfxckZ0VLdLz",
         },
     },
 
