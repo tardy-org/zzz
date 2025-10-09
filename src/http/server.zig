@@ -235,7 +235,7 @@ pub const Server = struct {
             provision.zc_recv_buffer = ZeroCopy(u8).init(rt.allocator, config.socket_buffer_bytes) catch {
                 @panic("attempting to allocate more memory than available. (ZeroCopyBuffer)");
             };
-            provision.header_buffer = std.ArrayList(u8).init(rt.allocator);
+            provision.header_buffer = std.ArrayList(u8).empty;
             provision.arena = std.heap.ArenaAllocator.init(rt.allocator);
             provision.captures = rt.allocator.alloc(Capture, config.capture_count_max) catch {
                 @panic("attempting to allocate more memory than available. (Captures)");
@@ -287,7 +287,7 @@ pub const Server = struct {
                             },
                         );
 
-                        log.info("rt{d} - \"{s} {s}\" {s} ({})", .{
+                        log.info("rt{d} - \"{s} {s}\" {s} ({f})", .{
                             rt.id,
                             @tagName(provision.request.method.?),
                             provision.request.uri.?,
@@ -377,7 +377,7 @@ pub const Server = struct {
                 };
 
                 const next_respond: Respond = next.run() catch |e| blk: {
-                    log.warn("rt{d} - \"{s} {s}\" {} ({})", .{
+                    log.warn("rt{d} - \"{s} {s}\" {} ({f})", .{
                         rt.id,
                         @tagName(provision.request.method.?),
                         provision.request.uri.?,
@@ -423,7 +423,7 @@ pub const Server = struct {
                 const body = provision.response.body orelse "";
                 const content_length = body.len;
 
-                try provision.response.headers_into_writer(provision.header_buffer.writer(), content_length);
+                try provision.response.headers_into_writer(provision.header_buffer.writer(rt.allocator), content_length);
                 const headers = provision.header_buffer.items;
 
                 var sent: usize = 0;
@@ -455,7 +455,7 @@ pub const Server = struct {
             },
         };
 
-        log.info("connection ({}) closed", .{secure.socket.addr});
+        log.info("connection ({f}) closed", .{secure.socket.addr});
 
         if (!accept_queued.*) {
             try rt.spawn(
@@ -505,7 +505,7 @@ pub const Server = struct {
             ) catch {
                 @panic("attempting to allocate more memory than available. (ZeroCopy)");
             };
-            provision.header_buffer = std.ArrayList(u8).init(rt.allocator);
+            provision.header_buffer = std.ArrayList(u8).empty;
             provision.arena = std.heap.ArenaAllocator.init(rt.allocator);
             provision.captures = rt.allocator.alloc(Capture, self.config.capture_count_max) catch {
                 @panic("attempting to allocate more memory than available. (Captures)");

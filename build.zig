@@ -38,7 +38,10 @@ pub fn build(b: *std.Build) void {
 
     const tests = b.addTest(.{
         .name = "tests",
-        .root_source_file = b.path("./src/tests.zig"),
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("./src/tests.zig"),
+            .target = target,
+        }),
     });
     tests.root_module.addImport("tardy", tardy);
     tests.root_module.addImport("secsock", secsock);
@@ -55,15 +58,19 @@ fn add_example(
     name: []const u8,
     link_libc: bool,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.Mode,
+    optimize: std.builtin.OptimizeMode,
     zzz_module: *std.Build.Module,
 ) void {
     const example = b.addExecutable(.{
         .name = name,
-        .root_source_file = b.path(b.fmt("./examples/{s}/main.zig", .{name})),
-        .target = target,
-        .optimize = optimize,
-        .strip = false,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(b.fmt("./examples/{s}/main.zig", .{name})),
+            .target = target,
+            .optimize = optimize,
+            .strip = false,
+        }),
+        // without llvm leads to error: undefined symbol: tardy_swap_frame
+        .use_llvm = true,
     });
 
     if (link_libc) {

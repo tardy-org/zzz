@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const Respond = @import("../response.zig").Respond;
 const Middleware = @import("../router/middleware.zig").Middleware;
@@ -7,7 +8,10 @@ const Layer = @import("../router/middleware.zig").Layer;
 const TypedMiddlewareFn = @import("../router/middleware.zig").TypedMiddlewareFn;
 
 const Kind = union(enum) {
-    gzip: std.compress.gzip.Options,
+    gzip: if (builtin.zig_version.major > 0 or builtin.zig_version.minor >= 15)
+        struct {}
+    else
+        std.compress.gzip.Options,
 };
 
 /// Compression Middleware.
@@ -15,6 +19,15 @@ const Kind = union(enum) {
 /// Provides a Compression Layer for all routes under this that
 /// will properly compress the body and add the proper `Content-Encoding` header.
 pub fn Compression(comptime compression: Kind) Layer {
+    // nop on zig 15, which seems unimplemented yet
+    if (builtin.zig_version.minor >= 15) {
+        const func: TypedMiddlewareFn(void) = struct {
+            fn noop_mw(next: *Next, _: void) !Respond {
+                return try next.run();
+            }
+        }.noop_mw;
+        return Middleware.init({}, func).layer();
+    }
     const func: TypedMiddlewareFn(void) = switch (compression) {
         .gzip => |inner| struct {
             fn gzip_mw(next: *Next, _: void) !Respond {
@@ -40,6 +53,5 @@ pub fn Compression(comptime compression: Kind) Layer {
             }
         }.gzip_mw,
     };
-
     return Middleware.init({}, func).layer();
 }
