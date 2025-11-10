@@ -1,14 +1,10 @@
 const std = @import("std");
-const log = std.log.scoped(.@"examples/middleware");
 
 const zzz = @import("zzz");
 const http = zzz.HTTP;
-
 const tardy = zzz.tardy;
-const Tardy = tardy.Tardy(.auto);
 const Runtime = tardy.Runtime;
 const Socket = tardy.Socket;
-
 const Server = http.Server;
 const Router = http.Router;
 const Context = http.Context;
@@ -16,6 +12,10 @@ const Route = http.Route;
 const Next = http.Next;
 const Respond = http.Respond;
 const Middleware = http.Middleware;
+
+const log = std.log.scoped(.@"examples/middleware");
+
+const Tardy = tardy.Tardy(.auto);
 
 fn root_handler(ctx: *const Context, id: i8) !Respond {
     const body_fmt =
@@ -39,7 +39,7 @@ fn root_handler(ctx: *const Context, id: i8) !Respond {
     // client and then continue to await more requests.
     return ctx.response.apply(.{
         .status = .OK,
-        .mime = http.Mime.HTML,
+        .mime = .HTML,
         .body = body[0..],
     });
 }
@@ -59,16 +59,16 @@ pub fn main() !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
-    var t = try Tardy.init(allocator, .{ .threading = .single });
+    var t: Tardy = try .init(allocator, .{ .threading = .single });
     defer t.deinit();
 
     const num: i8 = 12;
 
-    var router = try Router.init(allocator, &.{
+    var router: Router = try .init(allocator, &.{
         Middleware.init({}, passing_middleware).layer(),
         Route.init("/").get(num, root_handler).layer(),
         Middleware.init({}, failing_middleware).layer(),
@@ -82,7 +82,7 @@ pub fn main() !void {
         socket: Socket,
     };
 
-    var socket = try Socket.init(.{ .tcp = .{ .host = host, .port = port } });
+    var socket: Socket = try .init(.{ .tcp = .{ .host = host, .port = port } });
     defer socket.close_blocking();
     try socket.bind();
     try socket.listen(256);
@@ -91,7 +91,7 @@ pub fn main() !void {
         EntryParams{ .router = &router, .socket = socket },
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
-                var server = Server.init(.{});
+                var server: Server = .init(.{});
                 try server.serve(rt, p.router, .{ .normal = p.socket });
             }
         }.entry,

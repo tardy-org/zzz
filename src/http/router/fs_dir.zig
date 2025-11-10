@@ -1,20 +1,20 @@
 const std = @import("std");
-const log = std.log.scoped(.@"zzz/http/router");
 const assert = std.debug.assert;
 
-const Route = @import("route.zig").Route;
-const Layer = @import("middleware.zig").Layer;
+const Dir = @import("tardy").Dir;
+const Runtime = @import("tardy").Runtime;
+const Stat = @import("tardy").Stat;
+const Stream = @import("tardy").Stream;
+const ZeroCopy = @import("tardy").ZeroCopy;
+
+const Context = @import("../context.zig").Context;
+const Mime = @import("../mime.zig").Mime;
 const Request = @import("../request.zig").Request;
 const Respond = @import("../response.zig").Respond;
-const Mime = @import("../mime.zig").Mime;
-const Context = @import("../context.zig").Context;
+const Layer = @import("middleware.zig").Layer;
+const Route = @import("route.zig").Route;
 
-const Runtime = @import("tardy").Runtime;
-const ZeroCopy = @import("tardy").ZeroCopy;
-const Dir = @import("tardy").Dir;
-const Stat = @import("tardy").Stat;
-
-const Stream = @import("tardy").Stream;
+const log = std.log.scoped(.@"zzz/http/router");
 
 pub const FsDir = struct {
     fn fs_dir_handler(ctx: *const Context, dir: Dir) !Respond {
@@ -45,14 +45,14 @@ pub const FsDir = struct {
             error.NotFound => {
                 return ctx.response.apply(.{
                     .status = .@"Not Found",
-                    .mime = Mime.HTML,
+                    .mime = .HTML,
                 });
             },
             else => return e,
         };
         const stat = try file.stat(ctx.runtime);
 
-        var hash = std.hash.Wyhash.init(0);
+        var hash: std.hash.Wyhash = .init(0);
         hash.update(std.mem.asBytes(&stat.size));
         if (stat.modified) |modified| {
             hash.update(std.mem.asBytes(&modified.seconds));
@@ -69,7 +69,7 @@ pub const FsDir = struct {
                 // If the ETag matches.
                 return ctx.response.apply(.{
                     .status = .@"Not Modified",
-                    .mime = Mime.HTML,
+                    .mime = .HTML,
                 });
             }
         }
@@ -78,12 +78,16 @@ pub const FsDir = struct {
         response.status = .OK;
         response.mime = mime;
 
-        try response.headers_into_writer(ctx.header_buffer.writer(), stat.size);
-        const headers = ctx.header_buffer.items;
+        response.headers_into_writer(ctx.header_writer, stat.size) catch |err| switch (err) {
+            error.WriteFailed => return error.ExceededMaxHttpHeaderSize,
+            else => unreachable,
+        };
+        const headers = ctx.header_writer.buffered();
         const length = try ctx.socket.send_all(ctx.runtime, headers);
         if (headers.len != length) return error.SendingHeadersFailed;
 
-        var buffer = ctx.header_buffer.allocatedSlice();
+        // Reuse the header_buffer for file read/send
+        var buffer = ctx.header_writer.buffer[0..];
         while (true) {
             const read_count = file.read(ctx.runtime, buffer, null) catch |e| switch (e) {
                 error.EndOfFile => break,
@@ -105,6 +109,7 @@ pub const FsDir = struct {
             "{s}/%r",
             .{std.mem.trimRight(u8, url_path, "/")},
         );
+        log.debug("url with match {s}", .{url_with_match_all});
 
         return Route.init(url_with_match_all).get(dir, fs_dir_handler).layer();
     }

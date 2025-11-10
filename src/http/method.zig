@@ -1,4 +1,6 @@
 const std = @import("std");
+const testing = std.testing;
+
 const log = std.log.scoped(.@"zzz/http/method");
 
 pub const Method = enum(u8) {
@@ -44,8 +46,6 @@ pub const Method = enum(u8) {
         };
     }
 };
-
-const testing = std.testing;
 
 test "Parsing Strings" {
     for (std.meta.tags(Method)) |method| {

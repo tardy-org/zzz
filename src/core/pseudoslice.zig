@@ -1,5 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const testing = std.testing;
+
 const log = std.log.scoped(.@"zzz/core/pseudoslice");
 
 // The Pseudoslice will basically stitch together two different buffers, using
@@ -11,7 +13,7 @@ pub const Pseudoslice = struct {
     len: usize,
 
     pub fn init(first: []const u8, second: []const u8, shared: []u8) Pseudoslice {
-        return Pseudoslice{
+        return .{
             .first = first,
             .second = second,
             .shared = shared,
@@ -56,12 +58,10 @@ pub const Pseudoslice = struct {
     }
 };
 
-const testing = std.testing;
-
 test "Pseudoslice General" {
-    var buffer = [_]u8{0} ** 1024;
+    var buffer: [1024]u8 = @splat(0);
     const value = "hello, my name is muki";
-    var pseudo = Pseudoslice.init(value[0..6], value[6..], buffer[0..]);
+    var pseudo: Pseudoslice = .init(value[0..6], value[6..], buffer[0..]);
 
     for (0..pseudo.len) |i| {
         for (0..i) |j| {
@@ -71,9 +71,9 @@ test "Pseudoslice General" {
 }
 
 test "Pseudoslice Empty Second" {
-    var buffer = [_]u8{0} ** 1024;
+    var buffer: [1024]u8 = @splat(0);
     const value = "hello, my name is muki";
-    var pseudo = Pseudoslice.init(value[0..], &.{}, buffer[0..]);
+    var pseudo: Pseudoslice = .init(value[0..], &.{}, buffer[0..]);
 
     for (0..pseudo.len) |i| {
         try testing.expectEqualStrings(value[0..i], pseudo.get(0, i));
@@ -87,7 +87,7 @@ test "Pseudoslice First and Shared Same" {
     const value = "hello, my name is muki";
     std.mem.copyForwards(u8, buffer, value[0..6]);
 
-    var pseudo = Pseudoslice.init(buffer[0..6], value[6..], buffer);
+    var pseudo: Pseudoslice = .init(buffer[0..6], value[6..], buffer);
 
     for (0..pseudo.len) |i| {
         for (0..i) |j| {

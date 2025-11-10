@@ -1,18 +1,17 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.@"zzz/http/routing_trie");
+const testing = std.testing;
 
+const AnyCaseStringMap = @import("../../core/any_case_string_map.zig").AnyCaseStringMap;
+const decode_alloc = @import("../form.zig").decode_alloc;
+const Context = @import("../lib.zig").Context;
+const Respond = @import("../response.zig").Respond;
+const HandlerWithData = @import("route.zig").HandlerWithData;
 const Layer = @import("middleware.zig").Layer;
+const MiddlewareWithData = @import("middleware.zig").MiddlewareWithData;
 const Route = @import("route.zig").Route;
 
-const Respond = @import("../response.zig").Respond;
-const Context = @import("../lib.zig").Context;
-
-const HandlerWithData = @import("route.zig").HandlerWithData;
-const MiddlewareWithData = @import("middleware.zig").MiddlewareWithData;
-const AnyCaseStringMap = @import("../../core/any_case_string_map.zig").AnyCaseStringMap;
-
-const decode_alloc = @import("../form.zig").decode_alloc;
+const log = std.log.scoped(.@"zzz/http/routing_trie");
 
 fn TokenHashMap(comptime V: type) type {
     return std.HashMap(Token, V, struct {
@@ -136,7 +135,7 @@ pub const RoutingTrie = struct {
             return .{
                 .token = token,
                 .route = route,
-                .children = TokenHashMap(Node).init(allocator),
+                .children = .init(allocator),
             };
         }
 
@@ -152,13 +151,13 @@ pub const RoutingTrie = struct {
     };
 
     root: Node,
-    middlewares: std.ArrayListUnmanaged(MiddlewareWithData),
+    middlewares: std.ArrayList(MiddlewareWithData),
 
     /// Initialize the routing tree with the given routes.
     pub fn init(allocator: std.mem.Allocator, layers: []const Layer) !Self {
         var self: Self = .{
-            .root = Node.init(allocator, .{ .fragment = "" }, null),
-            .middlewares = try std.ArrayListUnmanaged(MiddlewareWithData).initCapacity(allocator, 0),
+            .root = .init(allocator, .{ .fragment = "" }, null),
+            .middlewares = .empty,
         };
 
         for (layers) |layer| {
@@ -168,7 +167,7 @@ pub const RoutingTrie = struct {
                     var iter = std.mem.tokenizeScalar(u8, route.path, '/');
 
                     while (iter.next()) |chunk| {
-                        const token: Token = Token.parse_chunk(chunk);
+                        const token: Token = .parse_chunk(chunk);
                         if (current.children.getPtr(token)) |child| {
                             current = child;
                         } else {
@@ -183,7 +182,7 @@ pub const RoutingTrie = struct {
                     };
 
                     for (route.handlers, 0..) |handler, i| if (handler) |h| {
-                        r.handlers[i] = HandlerWithData{
+                        r.handlers[i] = .{
                             .handler = h.handler,
                             .middlewares = self.middlewares.items,
                             .data = h.data,
@@ -229,21 +228,21 @@ pub const RoutingTrie = struct {
                     .match => |kind| {
                         switch (kind) {
                             .signed => if (std.fmt.parseInt(i64, chunk, 10)) |value| {
-                                captures[capture_idx] = Capture{ .signed = value };
+                                captures[capture_idx] = .{ .signed = value };
                             } else |_| continue :child_loop,
                             .unsigned => if (std.fmt.parseInt(u64, chunk, 10)) |value| {
-                                captures[capture_idx] = Capture{ .unsigned = value };
+                                captures[capture_idx] = .{ .unsigned = value };
                             } else |_| continue :child_loop,
                             // Float types MUST have a '.' to differentiate them.
                             .float => if (std.mem.indexOfScalar(u8, chunk, '.')) |_| {
                                 if (std.fmt.parseFloat(f64, chunk)) |value| {
-                                    captures[capture_idx] = Capture{ .float = value };
+                                    captures[capture_idx] = .{ .float = value };
                                 } else |_| continue :child_loop;
                             } else continue :child_loop,
-                            .string => captures[capture_idx] = Capture{ .string = chunk },
+                            .string => captures[capture_idx] = .{ .string = chunk },
                             .remaining => {
                                 const rest = iter.buffer[(iter.index - chunk.len)..];
-                                captures[capture_idx] = Capture{ .remaining = rest };
+                                captures[capture_idx] = .{ .remaining = rest };
 
                                 current = child;
                                 capture_idx += 1;
@@ -264,7 +263,7 @@ pub const RoutingTrie = struct {
             return null;
         }
 
-        var duped = try std.ArrayListUnmanaged([]const u8).initCapacity(allocator, 0);
+        var duped: std.ArrayList([]const u8) = .empty;
         defer duped.deinit(allocator);
         errdefer for (duped.items) |d| allocator.free(d);
 
@@ -293,7 +292,7 @@ pub const RoutingTrie = struct {
             }
         }
 
-        return Bundle{
+        return .{
             .route = current.route orelse return null,
             .captures = captures[0..capture_idx],
             .queries = queries,
@@ -302,11 +301,9 @@ pub const RoutingTrie = struct {
     }
 };
 
-const testing = std.testing;
-
 test "Chunk Parsing (Fragment)" {
     const chunk = "thisIsAFragment";
-    const token: Token = Token.parse_chunk(chunk);
+    const token: Token = .parse_chunk(chunk);
 
     switch (token) {
         .fragment => |inner| try testing.expectEqualStrings(chunk, inner),
@@ -323,7 +320,7 @@ test "Chunk Parsing (Match)" {
         "%s",
     };
 
-    const matches = [_]TokenMatch{
+    const matches: [5]TokenMatch = .{
         TokenMatch.signed,
         TokenMatch.signed,
         TokenMatch.unsigned,
@@ -332,7 +329,7 @@ test "Chunk Parsing (Match)" {
     };
 
     for (chunks, matches) |chunk, match| {
-        const token: Token = Token.parse_chunk(chunk);
+        const token: Token = .parse_chunk(chunk);
 
         switch (token) {
             .fragment => return error.IncorrectTokenParsing,
@@ -353,7 +350,7 @@ test "Path Parsing (Mixed)" {
     var iter = std.mem.tokenizeScalar(u8, path, '/');
 
     for (parsed) |expected| {
-        const token = Token.parse_chunk(iter.next().?);
+        const token: Token = .parse_chunk(iter.next().?);
         switch (token) {
             .fragment => |inner| try testing.expectEqualStrings(expected.fragment, inner),
             .match => |inner| try testing.expectEqual(expected.match, inner),
@@ -362,7 +359,7 @@ test "Path Parsing (Mixed)" {
 }
 
 test "Constructing Routing from Path" {
-    var s = try RoutingTrie.init(testing.allocator, &.{
+    var s: RoutingTrie = try .init(testing.allocator, &.{
         Route.init("/item").layer(),
         Route.init("/item/%i/description").layer(),
         Route.init("/item/%i/hello").layer(),
@@ -376,7 +373,7 @@ test "Constructing Routing from Path" {
 }
 
 test "Routing with Paths" {
-    var s = try RoutingTrie.init(testing.allocator, &.{
+    var s: RoutingTrie = try .init(testing.allocator, &.{
         Route.init("/item").layer(),
         Route.init("/item/%i/description").layer(),
         Route.init("/item/%i/hello").layer(),
@@ -386,10 +383,10 @@ test "Routing with Paths" {
     });
     defer s.deinit(testing.allocator);
 
-    var q = AnyCaseStringMap.init(testing.allocator);
+    var q: AnyCaseStringMap = .init(testing.allocator);
     defer q.deinit();
 
-    var captures: [8]Capture = [_]Capture{undefined} ** 8;
+    var captures: [8]Capture = @splat(undefined);
 
     try testing.expectEqual(null, try s.get_bundle(testing.allocator, "/item/name", captures[0..], &q));
 
@@ -409,7 +406,7 @@ test "Routing with Paths" {
 }
 
 test "Routing with Remaining" {
-    var s = try RoutingTrie.init(testing.allocator, &.{
+    var s: RoutingTrie = try .init(testing.allocator, &.{
         Route.init("/item").layer(),
         Route.init("/item/%f/price_float").layer(),
         Route.init("/item/name/%r").layer(),
@@ -417,10 +414,10 @@ test "Routing with Remaining" {
     });
     defer s.deinit(testing.allocator);
 
-    var q = AnyCaseStringMap.init(testing.allocator);
+    var q: AnyCaseStringMap = .init(testing.allocator);
     defer q.deinit();
 
-    var captures: [8]Capture = [_]Capture{undefined} ** 8;
+    var captures: [8]Capture = @splat(undefined);
 
     try testing.expectEqual(null, try s.get_bundle(testing.allocator, "/item/name", captures[0..], &q));
 
@@ -465,7 +462,7 @@ test "Routing with Remaining" {
 }
 
 test "Routing with Queries" {
-    var s = try RoutingTrie.init(testing.allocator, &.{
+    var s: RoutingTrie = try .init(testing.allocator, &.{
         Route.init("/item").layer(),
         Route.init("/item/%f/price_float").layer(),
         Route.init("/item/name/%r").layer(),
@@ -473,10 +470,10 @@ test "Routing with Queries" {
     });
     defer s.deinit(testing.allocator);
 
-    var q = AnyCaseStringMap.init(testing.allocator);
+    var q: AnyCaseStringMap = .init(testing.allocator);
     defer q.deinit();
 
-    var captures: [8]Capture = [_]Capture{undefined} ** 8;
+    var captures: [8]Capture = @splat(undefined);
 
     try testing.expectEqual(null, try s.get_bundle(
         testing.allocator,

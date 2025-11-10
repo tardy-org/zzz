@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const testing = std.testing;
 
 const Pair = @import("../core/lib.zig").Pair;
 
@@ -144,7 +145,7 @@ const all_mime_types = blk: {
     break :blk return_mimes;
 };
 
-const mime_extension_map = blk: {
+const mime_extension_map: std.StaticStringMap(Mime) = blk: {
     const num_pairs = num: {
         var count: usize = 0;
         for (all_mime_types) |mime| {
@@ -177,10 +178,10 @@ const mime_extension_map = blk: {
         }
     }
 
-    break :blk std.StaticStringMap(Mime).initComptime(pairs);
+    break :blk .initComptime(pairs);
 };
 
-const mime_content_map = blk: {
+const mime_content_map: std.StaticStringMap(Mime) = blk: {
     const num_pairs = num: {
         var count: usize = 0;
         for (all_mime_types) |mime| {
@@ -213,10 +214,8 @@ const mime_content_map = blk: {
         }
     }
 
-    break :blk std.StaticStringMap(Mime).initComptime(pairs);
+    break :blk .initComptime(pairs);
 };
-
-const testing = std.testing;
 
 test "MIME from extensions" {
     for (all_mime_types) |mime| {

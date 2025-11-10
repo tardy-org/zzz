@@ -2,18 +2,17 @@
     .name = .zzz,
     .fingerprint = 0xc3273dca261a7ae0,
     .version = "0.3.0",
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .tardy = .{
-            .url = "git+https://github.com/tardy-org/tardy?ref=v0.3.0#cd454060f3b6006368d53c05ab96cd16c73c34de",
-            .hash = "tardy-0.3.0-69wrgi7PAwDFhO7m0aXae6N15s2b28VIOrnRrSHHake6",
+            .url = "git+https://github.com/bernardassan/tardy?ref=zig-0.15.2#edd54c2dbdb745760848b083b7f844b05d531148",
+            .hash = "tardy-0.3.0-69wrgn77AwDLFqiryrDCuNl-q7xF9VEUdONc7ytrNvsM",
         },
         .secsock = .{
-            .url = "git+https://github.com/tardy-org/secsock?ref=v0.1.0#263dcd630e32c7a5c7a0522a8d1fd04e39b75c24",
-            .hash = "secsock-0.0.0-p0qurf09AQD95s1NQF2MGpBqMmFz7cKZWibsgv_SQBAr",
+            .url = "git+https://github.com/bernardassan/secsock?ref=zig-0.15.1#25cec3e1b68dac92c17f3071caacff6b71c00b68",
+            .hash = "secsock-0.0.0-p0qurQhGAQBqG1dPh8s4htvzl1w8qiGBCxUV9uTOrt9h",
         },
     },
-
     .paths = .{
         "README.md",
         "LICENSE",

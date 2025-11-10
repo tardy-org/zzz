@@ -1,24 +1,23 @@
 const std = @import("std");
-const builtin = @import("builtin");
-const log = std.log.scoped(.@"zzz/http/route");
 const assert = std.debug.assert;
+const builtin = @import("builtin");
 
 const wrap = @import("../../core/wrapping.zig").wrap;
-
+const Context = @import("../context.zig").Context;
+const Encoding = @import("../encoding.zig").Encoding;
 const Method = @import("../method.zig").Method;
+const Mime = @import("../mime.zig").Mime;
 const Request = @import("../request.zig").Request;
 const Response = @import("../response.zig").Response;
 const Respond = @import("../response.zig").Respond;
-const Mime = @import("../mime.zig").Mime;
-const Encoding = @import("../encoding.zig").Encoding;
-
 const FsDir = @import("fs_dir.zig").FsDir;
-const Context = @import("../context.zig").Context;
 const Layer = @import("middleware.zig").Layer;
-
 const MiddlewareWithData = @import("middleware.zig").MiddlewareWithData;
 
+const log = std.log.scoped(.@"zzz/http/route");
+
 pub const HandlerFn = *const fn (*const Context, usize) anyerror!Respond;
+
 pub fn TypedHandlerFn(comptime T: type) type {
     return *const fn (*const Context, T) anyerror!Respond;
 }
