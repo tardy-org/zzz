@@ -2,8 +2,9 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
+    //const optimize = b.standardOptimizeOption(.{}); // -O Debug
+    const optimize = std.builtin.OptimizeMode.ReleaseFast; // -O ReleaseFast
+    
     const zzz = b.addModule("zzz", .{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
@@ -35,7 +36,55 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag != .windows) {
         add_example(b, "unix", false, target, optimize, zzz);
     }
-
+    
+    
+    
+    const example1_ws_step = b.step("ex_ws_1", "Build ws example1");
+    const example2_ws_step = b.step("ex_ws_2", "Build ws example2");
+    const example3_ws_step = b.step("ex_ws_3", "Build ws example3");
+    
+    const exe_ws1 = b.addExecutable(.{ // without C libs
+      .name = "ex_ws_1", // exe name
+      .root_source_file = b.path("examples_ws/example_ws_1.zig"), // b.path("src/test1.zig"), // main file
+      .target = target,
+      .optimize = optimize,
+    });
+    const exe_ws2 = b.addExecutable(.{ // without C libs
+      .name = "ex_ws_2", // exe name
+      .root_source_file = b.path("examples_ws/example_ws_2.zig"), // main file
+      .target = target,
+      .optimize = optimize,
+    });
+    const exe_ws3 = b.addExecutable(.{ // without C libs
+      .name = "ex_ws_3", // exe name
+      .root_source_file = b.path("examples_ws/example_ws_3.zig"), // main file
+      .target = target,
+      .optimize = optimize,
+    });
+    
+    exe_ws1.root_module.addImport("zzz", zzz);
+    exe_ws2.root_module.addImport("zzz", zzz);
+    exe_ws3.root_module.addImport("zzz", zzz);
+    
+    const install_ws1 = b.addInstallBinFile(exe_ws1.getEmittedBin(), "../../ex_ws_1"); // b.addInstallBinFile(exe_ws1.getEmittedBin(), "ex_ws_1"); // -femit-bin=ex_ws_1 // to project root
+    b.getInstallStep().dependOn(&install_ws1.step);
+    example1_ws_step.dependOn(&install_ws1.step);
+    const install_ws2 = b.addInstallBinFile(exe_ws2.getEmittedBin(), "../../ex_ws_2"); // to project root
+    b.getInstallStep().dependOn(&install_ws2.step);
+    example2_ws_step.dependOn(&install_ws2.step);
+    const install_ws3 = b.addInstallBinFile(exe_ws3.getEmittedBin(), "../../ex_ws_3"); // to project root
+    b.getInstallStep().dependOn(&install_ws3.step);
+    example3_ws_step.dependOn(&install_ws3.step);
+    b.default_step = b.getInstallStep();
+    //b.installArtifact(exe_test1); // saves to /zig-out/bin/test1
+    
+    const all_ws_examples_step = b.step("examples_ws", "Build all WS examples");
+    all_ws_examples_step.dependOn(&install_ws1.step);
+    all_ws_examples_step.dependOn(&install_ws2.step);
+    all_ws_examples_step.dependOn(&install_ws3.step);
+    
+    
+    
     const tests = b.addTest(.{
         .name = "tests",
         .root_source_file = b.path("./src/tests.zig"),
