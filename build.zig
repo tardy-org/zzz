@@ -42,6 +42,7 @@ pub fn build(b: *std.Build) void {
     const example1_ws_step = b.step("ex_ws_1", "Build ws example1");
     const example2_ws_step = b.step("ex_ws_2", "Build ws example2");
     const example3_ws_step = b.step("ex_ws_3", "Build ws example3");
+    const example4_ws_step = b.step("ex_ws_4", "Build ws example4");
     
     const exe_ws1 = b.addExecutable(.{ // without C libs
       .name = "ex_ws_1", // exe name
@@ -61,10 +62,17 @@ pub fn build(b: *std.Build) void {
       .target = target,
       .optimize = optimize,
     });
+    const exe_ws4 = b.addExecutable(.{ // without C libs
+      .name = "ex_ws_4", // exe name
+      .root_source_file = b.path("examples_ws/example_ws_4.zig"), // main file
+      .target = target,
+      .optimize = optimize,
+    });
     
     exe_ws1.root_module.addImport("zzz", zzz);
     exe_ws2.root_module.addImport("zzz", zzz);
     exe_ws3.root_module.addImport("zzz", zzz);
+    exe_ws4.root_module.addImport("zzz", zzz);
     
     const install_ws1 = b.addInstallBinFile(exe_ws1.getEmittedBin(), "../../ex_ws_1"); // b.addInstallBinFile(exe_ws1.getEmittedBin(), "ex_ws_1"); // -femit-bin=ex_ws_1 // to project root
     b.getInstallStep().dependOn(&install_ws1.step);
@@ -75,6 +83,9 @@ pub fn build(b: *std.Build) void {
     const install_ws3 = b.addInstallBinFile(exe_ws3.getEmittedBin(), "../../ex_ws_3"); // to project root
     b.getInstallStep().dependOn(&install_ws3.step);
     example3_ws_step.dependOn(&install_ws3.step);
+    const install_ws4 = b.addInstallBinFile(exe_ws4.getEmittedBin(), "../../ex_ws_4"); // to project root
+    b.getInstallStep().dependOn(&install_ws4.step);
+    example4_ws_step.dependOn(&install_ws4.step);
     b.default_step = b.getInstallStep();
     //b.installArtifact(exe_test1); // saves to /zig-out/bin/test1
     
@@ -82,7 +93,7 @@ pub fn build(b: *std.Build) void {
     all_ws_examples_step.dependOn(&install_ws1.step);
     all_ws_examples_step.dependOn(&install_ws2.step);
     all_ws_examples_step.dependOn(&install_ws3.step);
-    
+    all_ws_examples_step.dependOn(&install_ws4.step);
     
     
     const tests = b.addTest(.{
@@ -134,3 +145,4 @@ fn add_example(
     run_step.dependOn(&install_artifact.step);
     run_step.dependOn(&run_artifact.step);
 }
+

@@ -116,181 +116,231 @@ pub fn upgrade(
 }
 
 pub fn runLoop(conn: Conn, handler: Handler, allocator: Allocator) !void {
-    const buffer = try allocator.alloc(u8, 65536);
-    defer allocator.free(buffer);
+    //const buffer = try allocator.alloc(u8, 65536);
+    //defer allocator.free(buffer);
     
-    var fragment = std.ArrayList(u8).init(allocator);
+    const read_buffer_size = 4096; // buffer for read from socket, 4 kb for one read syscall
+    const read_buffer = try allocator.alloc(u8, read_buffer_size);
+    defer allocator.free(read_buffer);
+    
+    var stash = std.ArrayList(u8).init(allocator); // buffer for incompleted frames between recv calls
+    defer stash.deinit();
+    
+    var fragment = std.ArrayList(u8).init(allocator); // for fragmented ws msg - Opcode 0x0
     defer fragment.deinit();
     
+    var is_text: ?bool = null;
+    
     while (true) {
-        const n = conn.socket.recv(conn.runtime, buffer) catch |err| {
+        const n = conn.socket.recv(conn.runtime, read_buffer) catch |err| {
             if (err == error.Closed) {
                 if (handler.on_disconnect) |on_disc| try on_disc(conn);
                 return;
             }
             return err;
         };
-
-        var i: usize = 0;
-        while (i < n) {
-            const byte1 = buffer[i];
-            i += 1;
-            if (i >= n) return error.InvalidFrame;
-            const byte2 = buffer[i];
-            i += 1;
-
-            const fin = (byte1 & 0x80) != 0;
-            const rsv1 = (byte1 & 0x40) != 0;
-            const opcode = byte1 & 0x0F;
-            const has_mask = (byte2 & 0x80) != 0;
-            var payload_len = @as(usize, byte2 & 0x7F);
-
-            if (payload_len == 126) {
-                if (i + 2 > n) return error.InvalidFrame;
-                //payload_len = @as(usize, @bitCast(std.mem.readIntBig(u16, buffer[i..])));
-                //payload_len = @as(usize, @bitCast(std.mem.readInt(u16, buffer[i..], .big)));
-                payload_len = @as(usize, @intCast(buffer[i])) << 8 |
-                  @as(usize, @intCast(buffer[i + 1]));
-                i += 2;
-            } else if (payload_len == 127) {
-                if (i + 8 > n) return error.InvalidFrame;
-                //payload_len = @as(usize, @bitCast(std.mem.readIntBig(u64, buffer[i..])));
-                //payload_len = @as(usize, @bitCast(std.mem.readInt(u64, buffer[i..], .big)));
-                payload_len =
-                  @as(usize, @intCast(buffer[i + 0])) << 56 |
-                  @as(usize, @intCast(buffer[i + 1])) << 48 |
-                  @as(usize, @intCast(buffer[i + 2])) << 40 |
-                  @as(usize, @intCast(buffer[i + 3])) << 32 |
-                  @as(usize, @intCast(buffer[i + 4])) << 24 |
-                  @as(usize, @intCast(buffer[i + 5])) << 16 |
-                  @as(usize, @intCast(buffer[i + 6])) << 8  |
-                  @as(usize, @intCast(buffer[i + 7]));
-                i += 8;
-            }
-
-            var mask: [4]u8 = undefined;
-            if (has_mask) {
-                if (i + 4 > n) return error.InvalidFrame;
-                mask = buffer[i..][0..4].*;
-                i += 4;
-            }
-            if (i + payload_len > n) return error.InvalidFrame;
-
-            const payload_start = i;
-            const payload_end = i + payload_len;
-            i = payload_end;
-
-            if (has_mask) {
-                for (payload_start..payload_end) |j| {
-                    buffer[j] ^= mask[(j - payload_start) % 4];
-                }
-            }
-
-            var payload = buffer[payload_start..payload_end];
-            
-            // Compression (permessage-deflate) // todo fix
-            if (rsv1) return error.CompressionNotNegotiated;
-            //var decompressed: ?[]u8 = null;
-            //if (rsv1) {
-            //    if (!conn.compression) return error.CompressionNotNegotiated;
-            //    const inflated_len = payload.len + 4;
-            //    const inflated = try allocator.alloc(u8, inflated_len);
-            //    errdefer allocator.free(inflated);
-            //    @memcpy(inflated[0..payload.len], payload);
-            //    inflated[payload.len + 0] = 0x00;
-            //    inflated[payload.len + 1] = 0x00;
-            //    inflated[payload.len + 2] = 0xFF;
-            //    inflated[payload.len + 3] = 0xFF;
-            //    const stream = std.io.fixedBufferStream(inflated);
-            //    var inflater = compress.flate.InflateStream.init(stream.reader(), .{});
-            //    defer inflater.deinit();
-            //    var out = std.ArrayList(u8).init(allocator);
-            //    errdefer out.deinit();
-            //    try inflater.reader().readAllArrayList(&out, 1024 * 1024);
-            //    allocator.free(inflated);
-            //    decompressed = try out.toOwnedSlice();
-            //    payload = decompressed.?;
-            //}
-            
-            var is_text: ?bool = null;
-            switch (opcode) {
-                0x1 => { // Text
-                    if (is_text == null) is_text = true;
-                    
-                    if (fin) {
-                        if (handler.on_message) |on_msg| try on_msg(conn, payload);
-                        //if (decompressed) |d| allocator.free(d);
-                    } else {
-                        try fragment.appendSlice(payload);
-                        //if (decompressed) |d| allocator.free(d);
-                    }
-                },
-                
-                0x2 => { // Binary
-                    if (is_text == null) is_text = false;
-                    
-                    if (fin) {
-                        if (handler.on_binary) |on_bin| try on_bin(conn, payload);
-                        //if (decompressed) |d| allocator.free(d);
-                    } else {
-                        try fragment.appendSlice(payload);
-                        //if (decompressed) |d| allocator.free(d);
-                    }
-                },
-                
-                0x0 => { // Continuation
-                    try fragment.appendSlice(payload);
-                    if (fin) {
-                        const full = fragment.items;
-                        if (is_text orelse true) {
-                          if (handler.on_message) |f| try f(conn, full);
-                        } else {
-                          if (handler.on_binary) |f| try f(conn, full);
-                        }
-                        is_text = null;
-                        fragment.clearRetainingCapacity();
-                    }
-                    //if (decompressed) |d| allocator.free(d);
-                },
-                0x8 => { // Close
-                    var code: u16 = 1000; // Normal closure code by default
-                    var reason_slice: []const u8 = "";
-                    if (payload.len >= 2) {
-                        code = std.mem.readInt(u16, payload[0..2], .big);
-                        
-                        if (payload.len > 2) {
-                            reason_slice = payload[2..];
-                            if (!std.unicode.utf8ValidateSlice(reason_slice)) {
-                                //conn.socket.socket.close_blocking(); // that makes tardy
-                                //if (decompressed) |d| allocator.free(d);
-                                if (handler.on_disconnect) |on_disc| try on_disc(conn);
-                                return;
-                            }
-                        }
-                    }
-                    conn.close(code, "") catch {}; // just exit
-                    if (handler.on_close) |on_close| try on_close(conn, code, reason_slice);
-                    if (handler.on_disconnect) |on_disc| try on_disc(conn);
-                    //if (decompressed) |d| allocator.free(d);
-                    return;
-                },
-                0x9 => { // Ping
-                  var buf = std.ArrayList(u8).init(allocator);
-                  defer buf.deinit();
-                  try writeFrameHeader(buf.writer(), .pong, payload.len, false);
-                  try buf.appendSlice(payload);
-                  _ = try conn.socket.send_all(conn.runtime, buf.items);
-                  //if (decompressed) |d| allocator.free(d);
-                },
-                0xA => { // Pong - ignore
-                  //if (decompressed) |d| allocator.free(d);
-                },
-                else => {
-                  //if (decompressed) |d| allocator.free(d);
-                  return error.UnsupportedOpcode;
-                },
-            }
+        
+        if (n == 0) { // if read 0 bytes - but no error.Closed- this can be disconnect too
+           if (handler.on_disconnect) |on_disc| try on_disc(conn);
+           return;
         }
+        
+        try stash.appendSlice(read_buffer[0..n]); // save readed
+        
+        var process_offset: usize = 0;
+        const data = stash.items;
+        
+        
+        while (true) { // do process collected
+          if (process_offset + 2 > data.len) break; // must be at least 2 bytes - minimal header
+          
+          const start_idx = process_offset;
+          const byte1 = data[start_idx];
+          const byte2 = data[start_idx + 1];
+          
+          const fin = (byte1 & 0x80) != 0;
+          const rsv1 = (byte1 & 0x40) != 0;
+          const opcode = byte1 & 0x0F;
+          const has_mask = (byte2 & 0x80) != 0;
+          var payload_len = @as(usize, byte2 & 0x7F);
+          
+          var header_len: usize = 2;
+          
+          if (payload_len == 126) { // check header length
+            if (start_idx + 4 > data.len) break; // lets wait for more data
+            //payload_len = std.mem.readInt(u16, data[start_idx+2..][0..2], .big);
+            payload_len = @as(usize, data[start_idx+2]) << 8 | @as(usize, data[start_idx+3]);
+            header_len += 2;
+          } else if (payload_len == 127) {
+            if (start_idx + 10 > data.len) break; // lets wait for more data
+            //payload_len = std.mem.readInt(u64, data[start_idx+2..][0..8], .big);
+            payload_len =
+              @as(usize, data[start_idx+2]) << 56 |
+              @as(usize, data[start_idx+3]) << 48 |
+              @as(usize, data[start_idx+4]) << 40 |
+              @as(usize, data[start_idx+5]) << 32 |
+              @as(usize, data[start_idx+6]) << 24 |
+              @as(usize, data[start_idx+7]) << 16 |
+              @as(usize, data[start_idx+8]) << 8  |
+              @as(usize, data[start_idx+9]);
+            header_len += 8;
+          }
+          
+          var mask: [4]u8 = undefined;
+          if (has_mask) {
+            if (start_idx + header_len + 4 > data.len) break; // lets wait for mask
+            @memcpy(&mask, data[start_idx + header_len..][0..4]);
+            header_len += 4;
+          }
+          
+          const total_frame_len = header_len + payload_len; // check we have complete message' body
+          if (start_idx + total_frame_len > data.len) break; // lets wait for rest message' body
+          // here we got complete frame
+          
+          const payload_start = start_idx + header_len;
+          const payload = data[payload_start .. payload_start + payload_len];
+          
+          if (has_mask) { // unmask
+            var j: usize = 0;
+            while (j < payload_len) : (j += 1) {
+              payload[j] ^= mask[j % 4];
+            }
+          }
+          
+          // Compression (permessage-deflate) // todo
+          if (rsv1) return error.CompressionNotNegotiated;
+          //var decompressed: ?[]u8 = null;
+          //if (rsv1) {
+          //    if (!conn.compression) return error.CompressionNotNegotiated;
+          //    const inflated_len = payload.len + 4;
+          //    const inflated = try allocator.alloc(u8, inflated_len);
+          //    errdefer allocator.free(inflated);
+          //    @memcpy(inflated[0..payload.len], payload);
+          //    inflated[payload.len + 0] = 0x00;
+          //    inflated[payload.len + 1] = 0x00;
+          //    inflated[payload.len + 2] = 0xFF;
+          //    inflated[payload.len + 3] = 0xFF;
+          //    const stream = std.io.fixedBufferStream(inflated);
+          //    var inflater = compress.flate.InflateStream.init(stream.reader(), .{});
+          //    defer inflater.deinit();
+          //    var out = std.ArrayList(u8).init(allocator);
+          //    errdefer out.deinit();
+          //    try inflater.reader().readAllArrayList(&out, 1024 * 1024);
+          //    allocator.free(inflated);
+          //    decompressed = try out.toOwnedSlice();
+          //    payload = decompressed.?;
+          //}
+          
+          switch (opcode) {
+            0x1 => { // Text
+              if (is_text != null) return error.InvalidWebSocketFrame;
+              is_text = true;
+              
+              if (fin) {
+                if (handler.on_message) |on_msg| try on_msg(conn, payload);
+                is_text = null; // because got complete message
+                //if (decompressed) |d| allocator.free(d);
+              } else {
+                try fragment.appendSlice(payload);
+                //if (decompressed) |d| allocator.free(d);
+              }
+            },
+            
+            0x2 => { // Binary
+              if (is_text != null) return error.InvalidWebSocketFrame;
+              is_text = false;
+              
+              if (fin) {
+                if (handler.on_binary) |on_bin| try on_bin(conn, payload);
+                is_text = null;
+                //if (decompressed) |d| allocator.free(d);
+              } else {
+                try fragment.appendSlice(payload);
+                //if (decompressed) |d| allocator.free(d);
+              }
+            },
+            
+            0x0 => { // Continuation
+              if (is_text == null) return error.InvalidWebSocketFrame; // we got message' second part but we do not know first part - was no start frame
+              
+              try fragment.appendSlice(payload);
+              
+              if (fin) {
+                const full = fragment.items;
+                if (is_text.?) { // not null here
+                  if (handler.on_message) |f| try f(conn, full);
+                } else {
+                  if (handler.on_binary) |f| try f(conn, full);
+                }
+                is_text = null;
+                fragment.clearRetainingCapacity();
+              }
+              //if (decompressed) |d| allocator.free(d);
+            },
+            
+            0x8 => { // Close
+              var code: u16 = 1000; // Normal closure code by default
+              var reason_slice: []const u8 = "";
+              
+              if (payload.len >= 2) {
+                code = std.mem.readInt(u16, payload[0..2], .big);
+                
+                if (payload.len > 2) reason_slice = payload[2..];
+              }
+                // if (payload.len > 2) {
+                  //reason_slice = payload[2..];
+                  //if (!std.unicode.utf8ValidateSlice(reason_slice)) {
+                    ////conn.socket.socket.close_blocking(); // that makes tardy
+                    ////if (decompressed) |d| allocator.free(d);
+                    //if (handler.on_disconnect) |on_disc| try on_disc(conn);
+                    //return;
+                  //}
+                //}
+              
+              conn.close(code, "") catch {}; // just exit
+              
+              if (handler.on_close) |on_close| try on_close(conn, code, reason_slice);
+              if (handler.on_disconnect) |on_disc| try on_disc(conn);
+              //if (decompressed) |d| allocator.free(d);
+              return;
+            },
+            
+            0x9 => { // Ping
+              const pong_payload = payload;
+              
+              var pong_buf = std.ArrayList(u8).init(allocator);
+              defer pong_buf.deinit();
+              
+              try writeFrameHeader(pong_buf.writer(), .pong, pong_payload.len, false);
+              try pong_buf.appendSlice(pong_payload);
+              
+              _ = try conn.socket.send_all(conn.runtime, pong_buf.items);
+              //if (decompressed) |d| allocator.free(d);
+            },
+            
+            0xA => { // Pong - ignore
+              //if (decompressed) |d| allocator.free(d);
+            },
+            
+            else => {
+              //if (decompressed) |d| allocator.free(d);
+              return error.UnsupportedOpcode;
+            },
+          }
+          
+          process_offset += total_frame_len; // shift offset
+        } // while ends - processed collected
+        
+        if (process_offset > 0) { // clean frame buffer // maybe todo RingBuffer
+          const remaining = data.len - process_offset;
+          if (remaining == 0) {
+            stash.clearRetainingCapacity();
+          } else {
+            std.mem.copyForwards(u8, stash.items[0..remaining], stash.items[process_offset..]); // mv tail to begin
+            stash.shrinkRetainingCapacity(remaining);
+          }
+        }
+    
     }
 }
 

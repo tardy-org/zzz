@@ -1,5 +1,5 @@
 
-// Pub/Sub for WS
+// Pub/Sub, WsSession for WS
 
 const std = @import("std");
 const zzz = @import("../lib.zig"); // "zzz" // for zzz.Context
@@ -10,27 +10,33 @@ const SecureSocket = zzz.secsock.SecureSocket;
 pub const UserWsHandler = struct {
   on_connect: ?*const fn (session: *WsSession) anyerror!void = null,
   on_message: ?*const fn (session: *WsSession, data: []const u8) anyerror!void = null,
+  on_binary: ?*const fn (session: *WsSession, data: []const u8) anyerror!void = null,
   on_close: ?*const fn (session: *WsSession) void = null,
-  on_disconnect: ?*const fn (session: *WsSession) void = null,
+  on_disconnect: ?*const fn (session: *WsSession) void = null, // optional
 };
 
+const QueuedMessage = struct {
+  data: []const u8,
+  is_binary: bool,
+};
 
-pub const WsSession = struct { // for safe multithread use Pub/Sub
+pub const WsSession = struct { // for safe multithread use Pub/Sub, for save user's state (context)
     conn: Conn,
     socket_owned: SecureSocket, // owned copy of socket structure (avoid use-after-free error)
-    outbox: std.ArrayList([]const u8), // messages queue that need to send to client with conn
+    outbox: std.ArrayList(QueuedMessage), // messages queue that need to send to client with conn
     mutex: std.Thread.Mutex,
     writer_task_id: usize = 0, // task id for send in native thread
     active: bool = true, // flag for to stop writer_task on disconnect
     allocator: std.mem.Allocator,
     writer_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false), // for avoid race condition
     handler: UserWsHandler, // for access callbacks inside session
+    context: ?*anyopaque = null, // save user's state
     
     pub fn init(allocator: std.mem.Allocator, conn: Conn, handler: UserWsHandler) WsSession {
         return .{
             .conn = conn,
             .socket_owned = conn.socket.*,
-            .outbox = std.ArrayList([]const u8).init(allocator),
+            .outbox = std.ArrayList(QueuedMessage).init(allocator),
             .mutex = .{},
             .allocator = allocator,
             .handler = handler,
@@ -40,13 +46,21 @@ pub const WsSession = struct { // for safe multithread use Pub/Sub
     pub fn deinit(self: *WsSession) void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        for (self.outbox.items) |msg| {
-            self.allocator.free(msg);
+        for (self.outbox.items) |item| {
+            self.allocator.free(item.data);
         }
         self.outbox.deinit();
     }
 
-    pub fn scheduleSend(self: *WsSession, data: []const u8) !void { // function for safe call from any thread
+    pub fn scheduleSend(self: *WsSession, data: []const u8) !void { // function for safe call from any thread // send text
+        return self.scheduleSendInternal(data, false);
+    }
+
+    pub fn scheduleSendBinary(self: *WsSession, data: []const u8) !void { // send binary
+        return self.scheduleSendInternal(data, true);
+    }
+
+    fn scheduleSendInternal(self: *WsSession, data: []const u8, is_binary: bool) !void {
         self.mutex.lock();
         if (!self.active) {
             self.mutex.unlock();
@@ -54,7 +68,7 @@ pub const WsSession = struct { // for safe multithread use Pub/Sub
         }
         
         const msg_copy = try self.allocator.dupe(u8, data); // copy msg to heap
-        try self.outbox.append(msg_copy);
+        try self.outbox.append(.{ .data = msg_copy, .is_binary = is_binary });
         self.mutex.unlock();
         
         try self.conn.runtime.trigger(self.writer_task_id); // conn.runtime.trigger is thread-safe // this is task-writer in target thread
@@ -182,13 +196,23 @@ fn writer_task(session: *WsSession) !void { // send message in same thread with 
         session.mutex.unlock();
         
         if (batch.len > 0) {
-          for (batch) |msg| {
-            session.conn.send(msg) catch |e| {
-                std.log.debug("WS Writer Error: {s}", .{ @errorName(e) });
-            };
-            session.allocator.free(msg);
+          for (batch) |item| {
+            if (item.is_binary) {
+              session.conn.sendBinary(item.data) catch |e| {
+                std.log.debug("WS Binary Write Error: {s}", .{ @errorName(e) });
+              };
+            
+            }else{
+              session.conn.send(item.data) catch |e| {
+                std.log.debug("WS Text Write Error: {s}", .{ @errorName(e) });
+              };
+            }
+            
+            session.allocator.free(item.data);
           }
           session.allocator.free(batch);
+          
+          continue;
         }
         try session.conn.runtime.scheduler.trigger_await();
     }
@@ -227,6 +251,13 @@ pub fn handle_upgrade(ctx: *const zzz.Context, user_handler: UserWsHandler, stac
             fn wrapper(c: Conn, d: []const u8) !void {
                 const s: *WsSession = @ptrCast(@alignCast(c.user_data)); // get session from user_data
                 if (s.handler.on_message) |f| try f(s, d);
+            }
+        }.wrapper,
+        
+        .on_binary = struct {
+            fn wrapper(c: Conn, d: []const u8) !void {
+                const s: *WsSession = @ptrCast(@alignCast(c.user_data));
+                if (s.handler.on_binary) |f| try f(s, d);
             }
         }.wrapper,
         
