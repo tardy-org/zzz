@@ -30,4 +30,7 @@ pub const Context = struct {
     captures: []const Capture,
     /// Map of the KV Query pairs in the URL
     queries: *const AnyCaseStringMap,
+    /// bind WebSocket to Context (for use on_connect etc)
+    ws_user_data: ?*anyopaque = null,
 };
+

@@ -23,7 +23,12 @@ pub const MiddlewareFn = @import("router/middleware.zig").MiddlewareFn;
 pub const Next = @import("router/middleware.zig").Next;
 pub const Middlewares = @import("middlewares/lib.zig");
 
+pub const Provision = @import("server.zig").Provision;
+
+pub const Capture = @import("router/routing_trie.zig").Capture;
 pub const FsDir = @import("router/fs_dir.zig").FsDir;
+
+pub const AnyCaseStringMap = @import("../core/any_case_string_map.zig").AnyCaseStringMap;
 
 pub const Server = @import("server.zig").Server;
 pub const ServerConfig = @import("server.zig").ServerConfig;
@@ -36,3 +41,4 @@ pub const HTTPError = error{
     URITooLong,
     HTTPVersionNotSupported,
 };
+
