@@ -17,8 +17,8 @@ const Bert_Value = @import("bert.zig").Bert_Value;
 const PORT = 3010;
 const HOST = "0.0.0.0";
 
-//const WS_STACK_SIZE = 1024 * 1024; // DEBUG
-const WS_STACK_SIZE = 32 * 1024; // RELEASE
+//const WS_STACK_SIZE = 1 * 1024 * 1024; // DEBUG = 1mb
+const WS_STACK_SIZE = 16 * 1024; // RELEASE = 16kb
 
 
 const ExtensionsLimits = struct {

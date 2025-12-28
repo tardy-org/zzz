@@ -14,8 +14,8 @@ const Socket = zzz.tardy.Socket;
 const PORT = 3010;
 const HOST = "0.0.0.0";
 
-//const STACK_SIZE = 10 * 1024 * 1024; // DEBUG
-const STACK_SIZE = 64 * 1024; // RELEASE
+//const STACK_SIZE = 1 * 1024 * 1024; // DEBUG = 1mb
+const STACK_SIZE = 16 * 1024; // RELEASE = 16kb
 
 
 // WebSocket handlers

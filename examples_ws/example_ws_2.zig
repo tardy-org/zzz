@@ -15,8 +15,8 @@ const Socket = zzz.tardy.Socket;
 const PORT = 443;
 const HOST = "0.0.0.0";
 
-//const STACK_SIZE = 10 * 1024 * 1024; // DEBUG
-const STACK_SIZE = 64 * 1024; // RELEASE
+//const STACK_SIZE = 1 * 1024 * 1024; // DEBUG = 1mb
+const STACK_SIZE = 32 * 1024; // RELEASE = 32kb
 
 const FULLCHAIN_CERT = "examples_ws/cert/fullchain.pem";
 const PRIVKEY_CERT = "examples_ws/cert/privkey.pem";

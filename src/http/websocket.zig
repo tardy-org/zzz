@@ -81,107 +81,135 @@ pub fn upgrade_to_websocket(
 
 // inner loop
 fn message_loop(conn: Conn, handler: WebSocketHandler) !void {
-    var buffer: [65536]u8 = undefined;
+    const allocator = conn.runtime.allocator;
+    ////var buffer: [65536]u8 = undefined;  //const buffer = try allocator.alloc(u8, 65536);  //defer allocator.free(buffer);
+    
+    const read_buffer_size = 4096; // 4kb = RAM page, so read by 4kb
+    const read_buffer = try allocator.alloc(u8, read_buffer_size);
+    defer allocator.free(read_buffer);
+    
+    var stash = std.ArrayList(u8).init(allocator);
+    defer stash.deinit();
+    
+    var fragment = std.ArrayList(u8).init(allocator);
+    defer fragment.deinit();
+    
     while (true) {
-        const n = conn.socket.recv(conn.runtime, &buffer) catch |err| {
+        const n = conn.socket.recv(conn.runtime, read_buffer) catch |err| {
             if (err == error.Closed) {
-                if (handler.on_disconnect) |on_disconnect| {
-                    _ = on_disconnect(conn);
-                }
+                if (handler.on_disconnect) |on_disconnect| { try on_disconnect(conn); } //_ = on_disconnect(conn);
                 return;
             }
             return err;
         };
-
+        
+        if (n == 0) {
+          if (handler.on_disconnect) |on_disconnect| { try on_disconnect(conn); }
+          return;
+        }
+        
+        try stash.appendSlice(read_buffer[0..n]);
+        
+        var process_offset: usize = 0;
+        const data = stash.items;
+        
         // RFC 6455
-        var i: usize = 0;
-        while (i < n) {
-            const op = buffer[i];
-            const fin = (op & 0x80) != 0;
-            const opcode = op & 0x0F;
-            i += 1;
-
-            if (i >= n) return error.InvalidWebSocketFrame;
-
-            const mask_flag = (buffer[i] & 0x80) != 0;
-            const payload_len_raw = buffer[i] & 0x7F;
-            i += 1;
-
-            if (i >= n) return error.InvalidWebSocketFrame;
-
-            var payload_len: usize = payload_len_raw;
-            var extra: usize = 0;
-            if (payload_len_raw == 126) {
-                if (i + 2 > n) return error.InvalidWebSocketFrame;
-                payload_len = @as(usize, @bitCast(std.mem.readIntBig(u16, buffer[i..])));
-                extra = 2;
-            } else if (payload_len_raw == 127) {
-                if (i + 8 > n) return error.InvalidWebSocketFrame;
-                payload_len = @as(usize, @bitCast(std.mem.readIntBig(u64, buffer[i..])));
-                extra = 8;
+        while (true) {
+          if (process_offset + 2 > data.len) break; // minimal header = 2 bytes
+          
+          const start_idx = process_offset;
+          const byte1 = data[start_idx];
+          const byte2 = data[start_idx + 1];
+          
+          const fin = (byte1 & 0x80) != 0;
+          const rsv1 = (byte1 & 0x40) != 0;
+          const opcode = byte1 & 0x0F;
+          const has_mask = (byte2 & 0x80) != 0;
+          var payload_len = @as(usize, byte2 & 0x7F);
+          
+          var header_len: usize = 2;
+          
+          if (payload_len == 126) {
+            if (start_idx + 4 > data.len) break; // waiting more bytes
+            payload_len = @as(usize, data[start_idx + 2]) << 8 | @as(usize, data[start_idx + 3]);
+            header_len += 2;
+          
+          } else if (payload_len == 127) {
+            if (start_idx + 10 > data.len) break; // waiting more bytes
+            
+            payload_len = 
+              @as(usize, data[start_idx+2]) << 56 |
+              @as(usize, data[start_idx+3]) << 48 |
+              @as(usize, data[start_idx+4]) << 40 |
+              @as(usize, data[start_idx+5]) << 32 |
+              @as(usize, data[start_idx+6]) << 24 |
+              @as(usize, data[start_idx+7]) << 16 |
+              @as(usize, data[start_idx+8]) << 8  |
+              @as(usize, data[start_idx+9]);
+            header_len += 8;
+          }
+          
+          var mask: [4]u8 = undefined;
+          if (has_mask) {
+            if (start_idx + header_len + 4 > data.len) break;
+            @memcpy(&mask, data[start_idx + header_len..][0..4]);
+            header_len += 4;
+          }
+          
+          const total_frame_len = header_len + payload_len;
+          if (start_idx + total_frame_len > data.len) break; // is complete?
+          
+          const payload_start = start_idx + header_len; // must be complete
+          const payload = data[payload_start .. payload_start + payload_len];
+          
+          if (has_mask) {
+            var j: usize = 0;
+            while (j < payload_len) : (j += 1) {
+              payload[j] ^= mask[j % 4];
             }
-
-            i += extra;
-            if (mask_flag) {
-                if (i + 4 > n) return error.InvalidWebSocketFrame;
-                const mask = buffer[i..][0..4].*;
-                i += 4;
-                if (i + payload_len > n) return error.InvalidWebSocketFrame;
-                
-                //for (0..payload_len) |j| {
-                //    buffer[i + j] ^= mask[j % 4];
-                //} // use next vector optimising instead this
-                
-                var j: usize = 0;
-                const vec_len = std.simd.suggestVectorLength(u8) orelse 16;
-                const Vector = @Vector(vec_len, u8);
-                
-                var mask_arr: [vec_len]u8 = undefined;
-                for (0..vec_len) |k| mask_arr[k] = mask[k % 4];
-                const mask_vec: Vector = mask_arr;
-                
-                while (j + vec_len <= payload_len) {
-                  const chunk: Vector = buffer[i+j..][0..vec_len].*;
-                  const res = chunk ^ mask_vec;
-                  buffer[i+j..][0..vec_len].* = res;
-                  j += vec_len;
-                }
-                
-                while (j < payload_len) : (j += 1) {
-                  buffer[i + j] ^= mask[j % 4];
-                }
-                
-                
+          }
+          
+          switch (opcode) {
+            0x1 => { // Text
+              if (fin and handler.on_message) |on_msg| {
+                try on_msg(conn, buffer[i .. i + payload_len]);
+              }
+            },
+            0x8 => { // Close
+              conn.close();
+              if (handler.on_disconnect) |on_disconnect| {
+                _ = on_disconnect(conn);
+              }
+              return;
+            },
+            0x9 => { // Ping - reply Pong
+              const pong = ([2]u8{ 0x8A, @intCast(@min(payload_len, 125)) })[0..];
+              _ = try conn.socket.send_all(conn.runtime, pong);
+              if (payload_len <= 125) {
+                _ = try conn.socket.send_all(conn.runtime, buffer[i .. i + payload_len]);
+              }
+            },
+            else => {
+              // ignore other opcode (binary, pong etc)
+            },
+          }
+          
+          process_offset += total_frame_len;
+        }
+        
+        if (process_offset > 0) { // clean
+          const remaining = data.len - process_offset;
+          if (remaining == 0) { // clean buffer
+            stash.clearRetainingCapacity();
+            
+            if (stash.capacity > 1024 * 1024) { // free RAM when buffer size more than 1mb
+              stash.shrinkAndFree(0);
             }
-
-            if (i + payload_len > n) return error.InvalidWebSocketFrame;
-
-            switch (opcode) {
-                0x1 => { // Text
-                    if (fin and handler.on_message) |on_msg| {
-                        try on_msg(conn, buffer[i .. i + payload_len]);
-                    }
-                },
-                0x8 => { // Close
-                    conn.close();
-                    if (handler.on_disconnect) |on_disconnect| {
-                        _ = on_disconnect(conn);
-                    }
-                    return;
-                },
-                0x9 => { // Ping - reply Pong
-                    const pong = ([2]u8{ 0x8A, @intCast(@min(payload_len, 125)) })[0..];
-                    _ = try conn.socket.send_all(conn.runtime, pong);
-                    if (payload_len <= 125) {
-                        _ = try conn.socket.send_all(conn.runtime, buffer[i .. i + payload_len]);
-                    }
-                },
-                else => {
-                    // ignore other opcode (binary, pong etc)
-                },
-            }
-
-            i += payload_len;
+          
+          } else {
+            std.mem.copyForwards(u8, stash.items[0..remaining], stash.items[process_offset..]);
+            stash.shrinkRetainingCapacity(remaining);
+          }
         }
     }
 }
