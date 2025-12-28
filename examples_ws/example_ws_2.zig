@@ -15,8 +15,12 @@ const Socket = zzz.tardy.Socket;
 const PORT = 443;
 const HOST = "0.0.0.0";
 
-//const STACK_SIZE = 1 * 1024 * 1024; // DEBUG = 1mb
-const STACK_SIZE = 32 * 1024; // RELEASE = 32kb
+
+const STACK_SIZE = if (@import("builtin").mode == .Debug)
+  1 * 1024 * 1024 // DEBUG = 1mb
+else
+  32 * 1024; // RELEASE = 32kb
+
 
 const FULLCHAIN_CERT = "examples_ws/cert/fullchain.pem";
 const PRIVKEY_CERT = "examples_ws/cert/privkey.pem";
@@ -157,6 +161,7 @@ fn on_ws_endpoint(ctx: *const zzz.Context, _: void) !zzz.HTTP.Respond {
 
 
 pub fn main() !void{
+    //@compileLog("STACK_SIZE = ", STACK_SIZE);
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();

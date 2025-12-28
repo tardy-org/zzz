@@ -14,8 +14,11 @@ const Socket = zzz.tardy.Socket;
 const PORT = 3010;
 const HOST = "0.0.0.0";
 
-//const STACK_SIZE = 1 * 1024 * 1024; // DEBUG = 1mb
-const STACK_SIZE = 16 * 1024; // RELEASE = 16kb
+
+const STACK_SIZE = if (@import("builtin").mode == .Debug)
+  1 * 1024 * 1024 // DEBUG = 1mb
+else
+  16 * 1024; // RELEASE = 16kb
 
 
 // WebSocket handlers
@@ -152,6 +155,7 @@ fn on_ws_endpoint(ctx: *const zzz.Context, _: void) !zzz.HTTP.Respond {
 
 
 pub fn main() !void{
+    //@compileLog("STACK_SIZE = ", STACK_SIZE);
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();

@@ -19,9 +19,14 @@ const PORT = 3010;
 //const PORT = 443;
 const HOST = "0.0.0.0";
 
-//const STACK_SIZE = 1 * 1024 * 1024; // DEBUG = 1 mb
-const STACK_SIZE = 16 * 1024; // RELEASE // reader stack // 8-16 kb without ssl usage, 32 kb when use ssl
+
+const STACK_SIZE = if (@import("builtin").mode == .Debug)
+  1 * 1024 * 1024 // DEBUG = 1mb
+else
+  16 * 1024; // RELEASE = 16kb // reader stack // 8-16 kb without ssl usage, 32 kb when use ssl
+
 const WS_WRITER_STACK = 8 * 1024; // stack size for writer task // 8 kb without ssl usage, 32 kb when use ssl
+
 
 var global_pubsub: PubSub = undefined;
 
