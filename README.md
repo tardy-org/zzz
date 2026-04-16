@@ -5,11 +5,12 @@
 ## Installing
 Compatible Zig Version: `0.15.2`
 
-Compatible [tardy](https://github.com/tardy-org/tardy) Version: `v0.3.0`
+Compatible [tardy](https://github.com/tardy-org/tardy) Version: `v0.3.1`
+Compatible [secsock](https://github.com/tardy-org/tardy) Version: `v0.1.1`
 
-Latest Release: `0.3.0`
+Latest Release: `0.3.1`
 ```
-zig fetch --save git+https://github.com/tardy-org/zzz#v0.3.0
+zig fetch --save git+https://github.com/tardy-org/zzz#v0.3.1
 ```
 
 You can then add the dependency in your `build.zig` file:
