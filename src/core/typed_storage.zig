@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 
 pub const TypedStorage = struct {
     arena: std.heap.ArenaAllocator,
@@ -6,8 +7,8 @@ pub const TypedStorage = struct {
 
     pub fn init(allocator: std.mem.Allocator) TypedStorage {
         return .{
-            .arena = std.heap.ArenaAllocator.init(allocator),
-            .storage = std.AutoHashMapUnmanaged(u64, *anyopaque){},
+            .arena = .init(allocator),
+            .storage = .empty,
         };
     }
 
@@ -40,10 +41,8 @@ pub const TypedStorage = struct {
     }
 };
 
-const testing = std.testing;
-
 test "TypedStorage: Basic" {
-    var storage = TypedStorage.init(testing.allocator);
+    var storage: TypedStorage = .init(testing.allocator);
     defer storage.deinit();
 
     // Test inserting and getting different types

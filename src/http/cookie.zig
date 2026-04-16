@@ -1,4 +1,7 @@
 const std = @import("std");
+const testing = std.testing;
+const Io = std.Io;
+
 const Date = @import("date.zig").Date;
 
 pub const Cookie = struct {
@@ -34,15 +37,14 @@ pub const Cookie = struct {
     };
 
     pub fn to_string_buf(self: Cookie, buf: []u8) ![]const u8 {
-        var list = std.ArrayListUnmanaged(u8).initBuffer(buf);
-        const writer = list.fixedWriter();
+        const writer: std.Io.Writer = .fixed(buf);
 
         try writer.print("{s}={s}", .{ self.name, self.value });
         if (self.domain) |domain| try writer.print("; Domain={s}", .{domain});
         if (self.path) |path| try writer.print("; Path={s}", .{path});
         if (self.expires) |exp| {
             try writer.writeAll("; Expires=");
-            try exp.to_http_date().into_writer(writer);
+            try exp.to_http_date().into_writer(&writer);
         }
         if (self.max_age) |age| try writer.print("; Max-Age={d}", .{age});
         if (self.same_site) |same_site| try writer.print(
@@ -52,13 +54,13 @@ pub const Cookie = struct {
         if (self.secure) try writer.writeAll("; Secure");
         if (self.http_only) try writer.writeAll("; HttpOnly");
 
-        return list.items;
+        return writer.buffered();
     }
 
     pub fn to_string_alloc(self: Cookie, allocator: std.mem.Allocator) ![]const u8 {
-        var list = try std.ArrayListUnmanaged(u8).initCapacity(allocator, 128);
-        errdefer list.deinit(allocator);
-        const writer = list.writer(allocator);
+        var aw: Io.Writer.Allocating = try .initCapacity(allocator, 128);
+        errdefer aw.deinit();
+        const writer = &aw.writer;
 
         try writer.print("{s}={s}", .{ self.name, self.value });
         if (self.domain) |domain| try writer.print("; Domain={s}", .{domain});
@@ -75,7 +77,7 @@ pub const Cookie = struct {
         if (self.secure) try writer.writeAll("; Secure");
         if (self.http_only) try writer.writeAll("; HttpOnly");
 
-        return list.toOwnedSlice(allocator);
+        return try aw.toOwnedSlice();
     }
 };
 
@@ -86,7 +88,7 @@ pub const CookieMap = struct {
     pub fn init(allocator: std.mem.Allocator) CookieMap {
         return .{
             .allocator = allocator,
-            .map = std.StringHashMap([]const u8).init(allocator),
+            .map = .init(allocator),
         };
     }
 
@@ -144,10 +146,8 @@ pub const CookieMap = struct {
     }
 };
 
-const testing = std.testing;
-
 test "Cookie: Header Parsing" {
-    var cookie_map = CookieMap.init(testing.allocator);
+    var cookie_map: CookieMap = .init(testing.allocator);
     defer cookie_map.deinit();
 
     try cookie_map.parse_from_header("sessionId=abc123; java=slop");
@@ -156,7 +156,7 @@ test "Cookie: Header Parsing" {
 }
 
 test "Cookie: Response Formatting" {
-    const cookie = Cookie{
+    const cookie: Cookie = .{
         .name = "session",
         .value = "abc123",
         .path = "/",

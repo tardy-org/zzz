@@ -38,7 +38,11 @@ pub fn build(b: *std.Build) void {
 
     const tests = b.addTest(.{
         .name = "tests",
-        .root_source_file = b.path("./src/tests.zig"),
+        .root_module = b.addModule("tests", .{
+            .root_source_file = b.path("./src/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     tests.root_module.addImport("tardy", tardy);
     tests.root_module.addImport("secsock", secsock);
@@ -55,22 +59,24 @@ fn add_example(
     name: []const u8,
     link_libc: bool,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.Mode,
+    optimize: std.builtin.OptimizeMode,
     zzz_module: *std.Build.Module,
 ) void {
+    const mod = b.createModule(.{
+        .root_source_file = b.path(b.fmt("./examples/{s}/main.zig", .{name})),
+        .optimize = optimize,
+        .target = target,
+        .strip = false,
+        .link_libc = link_libc,
+    });
+    mod.addImport("zzz", zzz_module);
+
     const example = b.addExecutable(.{
         .name = name,
-        .root_source_file = b.path(b.fmt("./examples/{s}/main.zig", .{name})),
-        .target = target,
-        .optimize = optimize,
-        .strip = false,
+        .root_module = mod,
+        // without llvm leads to error: undefined symbol: tardy_swap_frame
+        .use_llvm = true,
     });
-
-    if (link_libc) {
-        example.linkLibC();
-    }
-
-    example.root_module.addImport("zzz", zzz_module);
 
     const install_artifact = b.addInstallArtifact(example, .{});
     b.getInstallStep().dependOn(&install_artifact.step);

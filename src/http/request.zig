@@ -1,11 +1,13 @@
 const std = @import("std");
-const log = std.log.scoped(.@"zzz/http/request");
 const assert = std.debug.assert;
+const testing = std.testing;
 
 const AnyCaseStringMap = @import("../core/any_case_string_map.zig").AnyCaseStringMap;
 const CookieMap = @import("cookie.zig").CookieMap;
 const HTTPError = @import("lib.zig").HTTPError;
 const Method = @import("lib.zig").Method;
+
+const log = std.log.scoped(.@"zzz/http/request");
 
 pub const Request = struct {
     allocator: std.mem.Allocator,
@@ -18,10 +20,10 @@ pub const Request = struct {
 
     /// This is for constructing a Request.
     pub fn init(allocator: std.mem.Allocator) Request {
-        const headers = AnyCaseStringMap.init(allocator);
-        const cookies = CookieMap.init(allocator);
+        const headers: AnyCaseStringMap = .init(allocator);
+        const cookies: CookieMap = .init(allocator);
 
-        return Request{
+        return .{
             .allocator = allocator,
             .headers = headers,
             .cookies = cookies,
@@ -124,8 +126,6 @@ pub const Request = struct {
     }
 };
 
-const testing = std.testing;
-
 test "Parse Request" {
     const request_text =
         \\GET / HTTP/1.1
@@ -159,8 +159,9 @@ test "Expect ContentTooLong Error" {
         \\Accept: text/html
     ;
 
-    const request_text = std.fmt.comptimePrint(request_text_format, .{[_]u8{'a'} ** 4096});
-    var request = Request.init(testing.allocator);
+    const large_content: [4096]u8 = @splat('a');
+    const request_text = std.fmt.comptimePrint(request_text_format, .{large_content});
+    var request: Request = .init(testing.allocator);
     defer request.deinit();
 
     const err = request.parse_headers(request_text[0..], .{
@@ -178,8 +179,9 @@ test "Expect URITooLong Error" {
         \\Accept: text/html
     ;
 
-    const request_text = std.fmt.comptimePrint(request_text_format, .{[_]u8{'a'} ** 4096});
-    var request = Request.init(testing.allocator);
+    const large_content: [4096]u8 = @splat('a');
+    const request_text = std.fmt.comptimePrint(request_text_format, .{large_content[0..]});
+    var request: Request = .init(testing.allocator);
     defer request.deinit();
 
     const err = request.parse_headers(request_text[0..], .{
@@ -196,9 +198,9 @@ test "Expect Malformed when URI missing /" {
         \\Connection: keep-alive
         \\Accept: text/html
     ;
-
-    const request_text = std.fmt.comptimePrint(request_text_format, .{[_]u8{'a'} ** 256});
-    var request = Request.init(testing.allocator);
+    const content: [256]u8 = @splat('a');
+    const request_text = std.fmt.comptimePrint(request_text_format, .{content[0..]});
+    var request: Request = .init(testing.allocator);
     defer request.deinit();
 
     const err = request.parse_headers(request_text[0..], .{
@@ -216,7 +218,7 @@ test "Expect Incorrect HTTP Version" {
         \\Accept: text/html
     ;
 
-    var request = Request.init(testing.allocator);
+    var request: Request = .init(testing.allocator);
     defer request.deinit();
 
     const err = request.parse_headers(request_text[0..], .{
@@ -234,7 +236,7 @@ test "Malformed AnyCaseStringMap" {
         \\Accept: text/html
     ;
 
-    var request = Request.init(testing.allocator);
+    var request: Request = .init(testing.allocator);
     defer request.deinit();
 
     const err = request.parse_headers(request_text[0..], .{

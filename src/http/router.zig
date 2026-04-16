@@ -1,22 +1,20 @@
 const std = @import("std");
-const log = std.log.scoped(.@"zzz/http/router");
 const assert = std.debug.assert;
 
+const AnyCaseStringMap = @import("../core/any_case_string_map.zig").AnyCaseStringMap;
+const Context = @import("context.zig").Context;
+const Mime = @import("mime.zig").Mime;
+const Request = @import("request.zig").Request;
+const Respond = @import("response.zig").Respond;
+const Response = @import("response.zig").Response;
 const Layer = @import("router/middleware.zig").Layer;
 const Route = @import("router/route.zig").Route;
 const TypedHandlerFn = @import("router/route.zig").TypedHandlerFn;
-
 const Bundle = @import("router/routing_trie.zig").Bundle;
-
 const Capture = @import("router/routing_trie.zig").Capture;
-const Request = @import("request.zig").Request;
-const Response = @import("response.zig").Response;
-const Respond = @import("response.zig").Respond;
-const Mime = @import("mime.zig").Mime;
-const Context = @import("context.zig").Context;
-
 const RoutingTrie = @import("router/routing_trie.zig").RoutingTrie;
-const AnyCaseStringMap = @import("../core/any_case_string_map.zig").AnyCaseStringMap;
+
+const log = std.log.scoped(.@"zzz/http/router");
 
 /// Default not found handler: send a plain text response.
 pub const default_not_found_handler = struct {
@@ -45,12 +43,10 @@ pub const Router = struct {
         layers: []const Layer,
         configuration: Configuration,
     ) !Router {
-        const self = Router{
-            .routes = try RoutingTrie.init(allocator, layers),
+        return .{
+            .routes = try .init(allocator, layers),
             .configuration = configuration,
         };
-
-        return self;
     }
 
     pub fn deinit(self: *Router, allocator: std.mem.Allocator) void {
@@ -66,7 +62,7 @@ pub const Router = struct {
     ) !Bundle {
         queries.clearRetainingCapacity();
 
-        return try self.routes.get_bundle(allocator, path, captures, queries) orelse Bundle{
+        return try self.routes.get_bundle(allocator, path, captures, queries) orelse .{
             .route = Route.init("").all({}, self.configuration.not_found),
             .captures = captures[0..],
             .queries = queries,

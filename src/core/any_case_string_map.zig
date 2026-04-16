@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const testing = std.testing;
 
 const Pool = @import("tardy").Pool;
 
@@ -7,7 +8,7 @@ const AnyCaseStringContext = struct {
     const Self = @This();
 
     pub fn hash(_: Self, key: []const u8) u64 {
-        var wyhash = std.hash.Wyhash.init(0);
+        var wyhash: std.hash.Wyhash = .init(0);
         for (key) |b| wyhash.update(&.{std.ascii.toLower(b)});
         return wyhash.final();
     }
@@ -21,10 +22,8 @@ const AnyCaseStringContext = struct {
 
 pub const AnyCaseStringMap = std.HashMap([]const u8, []const u8, AnyCaseStringContext, 80);
 
-const testing = std.testing;
-
 test "AnyCaseStringMap: Add Stuff" {
-    var map = AnyCaseStringMap.init(testing.allocator);
+    var map: AnyCaseStringMap = .init(testing.allocator);
     defer map.deinit();
 
     try map.put("Content-Length", "100");

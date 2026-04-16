@@ -1,15 +1,11 @@
 const std = @import("std");
-const log = std.log.scoped(.@"examples/sse");
 
 const zzz = @import("zzz");
 const http = zzz.HTTP;
-
 const tardy = zzz.tardy;
-const Tardy = tardy.Tardy(.auto);
 const Runtime = tardy.Runtime;
 const Socket = tardy.Socket;
 const Timer = tardy.Timer;
-
 const Server = http.Server;
 const Router = http.Router;
 const Context = http.Context;
@@ -17,8 +13,12 @@ const Route = http.Route;
 const Respond = http.Respond;
 const SSE = http.SSE;
 
+const log = std.log.scoped(.@"examples/sse");
+
+const Tardy = tardy.Tardy(.auto);
+
 fn sse_handler(ctx: *const Context, _: void) !Respond {
-    var sse = try SSE.init(ctx);
+    var sse: SSE = try .init(ctx);
 
     while (true) {
         sse.send(.{ .data = "hello from handler!" }) catch break;
@@ -32,20 +32,20 @@ pub fn main() !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
-    var t = try Tardy.init(allocator, .{ .threading = .single });
+    var t: Tardy = try .init(allocator, .{ .threading = .single });
     defer t.deinit();
 
-    const router = try Router.init(allocator, &.{
-        Route.init("/").embed_file(.{ .mime = http.Mime.HTML }, @embedFile("./index.html")).layer(),
+    const router: Router = try .init(allocator, &.{
+        Route.init("/").embed_file(.{ .mime = .HTML }, @embedFile("./index.html")).layer(),
         Route.init("/stream").get({}, sse_handler).layer(),
     }, .{});
 
     // create socket for tardy
-    var socket = try Socket.init(.{ .tcp = .{ .host = host, .port = port } });
+    var socket: Socket = try .init(.{ .tcp = .{ .host = host, .port = port } });
     defer socket.close_blocking();
     try socket.bind();
     try socket.listen(256);
@@ -59,7 +59,7 @@ pub fn main() !void {
         EntryParams{ .router = &router, .socket = socket },
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
-                var server = Server.init(.{
+                var server: Server = .init(.{
                     .stack_size = 1024 * 1024 * 4,
                     .socket_buffer_bytes = 1024 * 2,
                 });

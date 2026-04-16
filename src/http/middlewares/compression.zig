@@ -1,4 +1,5 @@
 const std = @import("std");
+const flate = std.compress.flate;
 
 const Respond = @import("../response.zig").Respond;
 const Middleware = @import("../router/middleware.zig").Middleware;
@@ -6,9 +7,9 @@ const Next = @import("../router/middleware.zig").Next;
 const Layer = @import("../router/middleware.zig").Layer;
 const TypedMiddlewareFn = @import("../router/middleware.zig").TypedMiddlewareFn;
 
-const Kind = union(enum) {
-    gzip: std.compress.gzip.Options,
-};
+const Kind = union(enum) { gzip: struct {
+    level: flate.Compress.Level = .default,
+} };
 
 /// Compression Middleware.
 ///
@@ -16,23 +17,23 @@ const Kind = union(enum) {
 /// will properly compress the body and add the proper `Content-Encoding` header.
 pub fn Compression(comptime compression: Kind) Layer {
     const func: TypedMiddlewareFn(void) = switch (compression) {
-        .gzip => |inner| struct {
+        .gzip => |_| struct {
             fn gzip_mw(next: *Next, _: void) !Respond {
                 const respond = try next.run();
                 const response = next.context.response;
                 if (response.body) |body| if (respond == .standard) {
-                    var compressed = try std.ArrayListUnmanaged(u8).initCapacity(next.context.allocator, body.len);
-                    errdefer compressed.deinit(next.context.allocator);
+                    var compressed: std.Io.Writer.Allocating = try .initCapacity(next.context.allocator, body.len);
+                    errdefer compressed.deinit();
 
-                    var body_stream = std.io.fixedBufferStream(body);
-                    try std.compress.gzip.compress(
-                        body_stream.reader(),
-                        compressed.writer(next.context.allocator),
-                        inner,
-                    );
+                    var body_stream: flate.Compress = .init(&compressed.writer, &.{}, .{
+                        .level = compression.gzip.level,
+                        .container = .gzip,
+                    });
+                    try body_stream.writer.writeAll(body);
+                    try body_stream.writer.flush();
 
                     try response.headers.put("Content-Encoding", "gzip");
-                    response.body = try compressed.toOwnedSlice(next.context.allocator);
+                    response.body = try compressed.toOwnedSlice();
                     return .standard;
                 };
 

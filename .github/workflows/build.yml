@@ -19,11 +19,11 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v2
-      - uses: goto-bus-stop/setup-zig@v2
+      - uses: actions/checkout@v5
+      - uses: mlugg/setup-zig@v2
         with:
-          version: 0.14.0
-      - name: Build all examples 
+          version: 0.15.2
+      - name: Build all examples
         run: zig build
 
   run-tests:
@@ -35,9 +35,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v2
-      - uses: goto-bus-stop/setup-zig@v2
+      - uses: actions/checkout@v5
+      - uses: mlugg/setup-zig@v2
         with:
-          version: 0.14.0
-      - name: Build all examples 
+          version: 0.15.2
+      - name: Build all examples
         run: zig build test --summary all

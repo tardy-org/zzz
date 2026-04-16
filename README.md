@@ -3,7 +3,7 @@
 
 
 ## Installing
-Compatible Zig Version: `0.14.0`
+Compatible Zig Version: `0.15.2`
 
 Compatible [tardy](https://github.com/tardy-org/tardy) Version: `v0.3.0`
 
@@ -62,8 +62,8 @@ zzz can be configured to utilize minimal memory while remaining performant. The 
     - `poll` for Linux, Mac and Windows.
 - Layered Router, including Middleware
 - Single and Multithreaded Support
-- TLS using [secsock](https://github.com/tardy-org/secsock) 
-- Memory Pooling for minimal allocations 
+- TLS using [secsock](https://github.com/tardy-org/secsock)
+- Memory Pooling for minimal allocations
 
 ## Contribution
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in zzz by you, shall be licensed as MPL2.0, without any additional terms or conditions.

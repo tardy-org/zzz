@@ -1,15 +1,16 @@
 const std = @import("std");
-
-const Pseudoslice = @import("../core/pseudoslice.zig").Pseudoslice;
-
-const Provision = @import("server.zig").Provision;
-const Context = @import("context.zig").Context;
-const Mime = @import("mime.zig").Mime;
+const Writer = std.Io.Writer;
 
 const Runtime = @import("tardy").Runtime;
-
 const secsock = @import("secsock");
 const SecureSocket = secsock.SecureSocket;
+
+const Pseudoslice = @import("../core/pseudoslice.zig").Pseudoslice;
+const Context = @import("context.zig").Context;
+const Mime = @import("mime.zig").Mime;
+const Provision = @import("server.zig").Provision;
+
+const log = std.log.scoped(.@"zzz/http/sse");
 
 const SSEMessage = struct {
     id: ?[]const u8 = null,
@@ -20,40 +21,38 @@ const SSEMessage = struct {
 
 pub const SSE = struct {
     socket: SecureSocket,
-    allocator: std.mem.Allocator,
-    list: std.ArrayListUnmanaged(u8),
+    writer: Writer.Allocating,
     runtime: *Runtime,
 
     pub fn init(ctx: *const Context) !SSE {
         const response = ctx.response;
         response.status = .OK;
-        response.mime = Mime{
+        response.mime = .{
             .content_type = .{ .single = "text/event-stream" },
             .extension = .{ .single = "" },
             .description = "SSE",
         };
 
-        var list = try std.ArrayListUnmanaged(u8).initCapacity(ctx.allocator, 0);
-        errdefer list.deinit(ctx.allocator);
+        var writer: Writer.Allocating = .init(ctx.allocator);
+        errdefer writer.deinit();
 
-        try ctx.response.headers_into_writer(ctx.header_buffer.writer(), null);
-        const headers = ctx.header_buffer.items;
+        try ctx.response.headers_into_writer(ctx.header_writer, null);
+        const headers = ctx.header_writer.buffered();
 
         const sent = try ctx.socket.send_all(ctx.runtime, headers);
         if (sent != headers.len) return error.Closed;
 
         return .{
             .socket = ctx.socket,
-            .allocator = ctx.allocator,
-            .list = list,
+            .writer = writer,
             .runtime = ctx.runtime,
         };
     }
 
     pub fn send(self: *SSE, message: SSEMessage) !void {
-        // just reuse the list
-        defer self.list.clearRetainingCapacity();
-        const writer = self.list.writer(self.allocator);
+        var aw = &self.writer;
+        defer aw.clearRetainingCapacity(); // reuse the writer
+        const writer = &aw.writer;
 
         if (message.id) |id| try writer.print("id: {s}\n", .{id});
         if (message.event) |event| try writer.print("event: {s}\n", .{event});
@@ -64,7 +63,8 @@ pub const SSE = struct {
         if (message.retry) |retry| try writer.print("retry: {d}\n", .{retry});
         try writer.writeByte('\n');
 
-        const sent = try self.socket.send_all(self.runtime, self.list.items);
-        if (sent != self.list.items.len) return error.Closed;
+        const written = aw.written();
+        const sent = try self.socket.send_all(self.runtime, written);
+        if (sent != written.len) return error.Closed;
     }
 };

@@ -1,47 +1,42 @@
 const std = @import("std");
+const assert = std.debug.assert;
+const Io = std.Io;
 const builtin = @import("builtin");
 const tag = builtin.os.tag;
-const assert = std.debug.assert;
-const log = std.log.scoped(.@"zzz/http/server");
 
-const TypedStorage = @import("../core/typed_storage.zig").TypedStorage;
-const Pseudoslice = @import("../core/pseudoslice.zig").Pseudoslice;
-const AnyCaseStringMap = @import("../core/any_case_string_map.zig").AnyCaseStringMap;
-
-const Context = @import("context.zig").Context;
-const Request = @import("request.zig").Request;
-const Response = @import("response.zig").Response;
-const Respond = @import("response.zig").Respond;
-const Capture = @import("router/routing_trie.zig").Capture;
-const SSE = @import("sse.zig").SSE;
-
-const Mime = @import("mime.zig").Mime;
-const Router = @import("router.zig").Router;
-const Route = @import("router/route.zig").Route;
-const Layer = @import("router/middleware.zig").Layer;
-const Middleware = @import("router/middleware.zig").Middleware;
-const HTTPError = @import("lib.zig").HTTPError;
-
-const HandlerWithData = @import("router/route.zig").HandlerWithData;
-
-const Next = @import("router/middleware.zig").Next;
-
-pub const Runtime = @import("tardy").Runtime;
-pub const Task = @import("tardy").Task;
-const TardyCreator = @import("tardy").Tardy;
-
+const AcceptResult = @import("tardy").AcceptResult;
 const Cross = @import("tardy").Cross;
 const Pool = @import("tardy").Pool;
 const PoolKind = @import("tardy").PoolKind;
-const Socket = @import("tardy").Socket;
-const ZeroCopy = @import("tardy").ZeroCopy;
-
-const AcceptResult = @import("tardy").AcceptResult;
 const RecvResult = @import("tardy").RecvResult;
-const SendResult = @import("tardy").SendResult;
-
+pub const Runtime = @import("tardy").Runtime;
 const secsock = @import("secsock");
 const SecureSocket = secsock.SecureSocket;
+const SendResult = @import("tardy").SendResult;
+const Socket = @import("tardy").Socket;
+const TardyCreator = @import("tardy").Tardy;
+pub const Task = @import("tardy").Task;
+const ZeroCopy = @import("tardy").ZeroCopy;
+
+const AnyCaseStringMap = @import("../core/any_case_string_map.zig").AnyCaseStringMap;
+const Pseudoslice = @import("../core/pseudoslice.zig").Pseudoslice;
+const TypedStorage = @import("../core/typed_storage.zig").TypedStorage;
+const Context = @import("context.zig").Context;
+const HTTPError = @import("lib.zig").HTTPError;
+const Mime = @import("mime.zig").Mime;
+const Request = @import("request.zig").Request;
+const Respond = @import("response.zig").Respond;
+const Response = @import("response.zig").Response;
+const Router = @import("router.zig").Router;
+const Layer = @import("router/middleware.zig").Layer;
+const Middleware = @import("router/middleware.zig").Middleware;
+const Next = @import("router/middleware.zig").Next;
+const Route = @import("router/route.zig").Route;
+const HandlerWithData = @import("router/route.zig").HandlerWithData;
+const Capture = @import("router/routing_trie.zig").Capture;
+const SSE = @import("sse.zig").SSE;
+
+const log = std.log.scoped(.@"zzz/http/server");
 
 pub const TLSFileOptions = union(enum) {
     buffer: []const u8,
@@ -128,7 +123,7 @@ pub const Provision = struct {
     initalized: bool = false,
     recv_slice: []u8,
     zc_recv_buffer: ZeroCopy(u8),
-    header_buffer: std.ArrayList(u8),
+    header_writer: Io.Writer,
     arena: std.heap.ArenaAllocator,
     storage: TypedStorage,
     captures: []Capture,
@@ -173,7 +168,7 @@ pub const Server = struct {
         provision.response.clear();
         provision.storage.clear();
         provision.zc_recv_buffer.clear_retaining_capacity();
-        provision.header_buffer.clearRetainingCapacity();
+        _ = provision.header_writer.consumeAll();
         _ = provision.arena.reset(.{ .retain_with_limit = config.connection_arena_bytes_retain });
         provision.recv_slice = try provision.zc_recv_buffer.get_write_area(config.socket_buffer_bytes);
 
@@ -235,15 +230,16 @@ pub const Server = struct {
             provision.zc_recv_buffer = ZeroCopy(u8).init(rt.allocator, config.socket_buffer_bytes) catch {
                 @panic("attempting to allocate more memory than available. (ZeroCopyBuffer)");
             };
-            provision.header_buffer = std.ArrayList(u8).init(rt.allocator);
-            provision.arena = std.heap.ArenaAllocator.init(rt.allocator);
+            provision.arena = .init(rt.allocator);
+            // TODO: use a server config option
+            provision.header_writer = .fixed(try provision.arena.allocator().alloc(u8, 8 * 1024));
             provision.captures = rt.allocator.alloc(Capture, config.capture_count_max) catch {
                 @panic("attempting to allocate more memory than available. (Captures)");
             };
-            provision.queries = AnyCaseStringMap.init(rt.allocator);
-            provision.storage = TypedStorage.init(rt.allocator);
-            provision.request = Request.init(rt.allocator);
-            provision.response = Response.init(rt.allocator);
+            provision.queries = .init(rt.allocator);
+            provision.storage = .init(rt.allocator);
+            provision.request = .init(rt.allocator);
+            provision.response = .init(rt.allocator);
             provision.initalized = true;
         }
         defer prepare_new_request(null, provision, config) catch unreachable;
@@ -287,7 +283,7 @@ pub const Server = struct {
                             },
                         );
 
-                        log.info("rt{d} - \"{s} {s}\" {s} ({})", .{
+                        log.info("rt{d} - \"{s} {s}\" {s} ({f})", .{
                             rt.id,
                             @tagName(provision.request.method.?),
                             provision.request.uri.?,
@@ -361,7 +357,7 @@ pub const Server = struct {
                 const context: Context = .{
                     .runtime = rt,
                     .allocator = provision.arena.allocator(),
-                    .header_buffer = &provision.header_buffer,
+                    .header_writer = &provision.header_writer,
                     .request = &provision.request,
                     .response = &provision.response,
                     .storage = &provision.storage,
@@ -377,7 +373,7 @@ pub const Server = struct {
                 };
 
                 const next_respond: Respond = next.run() catch |e| blk: {
-                    log.warn("rt{d} - \"{s} {s}\" {} ({})", .{
+                    log.warn("rt{d} - \"{s} {s}\" {} ({f})", .{
                         rt.id,
                         @tagName(provision.request.method.?),
                         provision.request.uri.?,
@@ -391,7 +387,7 @@ pub const Server = struct {
 
                     break :blk try provision.response.apply(.{
                         .status = .@"Internal Server Error",
-                        .mime = Mime.TEXT,
+                        .mime = .TEXT,
                         .body = body,
                     });
                 };
@@ -423,11 +419,11 @@ pub const Server = struct {
                 const body = provision.response.body orelse "";
                 const content_length = body.len;
 
-                try provision.response.headers_into_writer(provision.header_buffer.writer(), content_length);
-                const headers = provision.header_buffer.items;
+                try provision.response.headers_into_writer(&provision.header_writer, content_length);
+                const headers = provision.header_writer.buffered();
 
                 var sent: usize = 0;
-                const pseudo = Pseudoslice.init(headers, body, provision.recv_slice);
+                const pseudo: Pseudoslice = .init(headers, body, provision.recv_slice);
 
                 while (sent < pseudo.len) {
                     const send_slice = pseudo.get(sent, sent + provision.recv_slice.len);
@@ -455,7 +451,7 @@ pub const Server = struct {
             },
         };
 
-        log.info("connection ({}) closed", .{secure.socket.addr});
+        log.info("connection ({f}) closed", .{secure.socket.addr});
 
         if (!accept_queued.*) {
             try rt.spawn(
@@ -477,7 +473,7 @@ pub const Server = struct {
         log.info("security mode: {s}", .{@tagName(sock)});
 
         const secure: SecureSocket = switch (sock) {
-            .normal => |s| SecureSocket.unsecured(s),
+            .normal => |s| .unsecured(s),
             .secure => |sec| sec,
         };
 
@@ -485,7 +481,7 @@ pub const Server = struct {
         const pooling: PoolKind = if (self.config.connection_count_max == null) .grow else .static;
 
         const provision_pool = try rt.allocator.create(Pool(Provision));
-        provision_pool.* = try Pool(Provision).init(rt.allocator, count, pooling);
+        provision_pool.* = try .init(rt.allocator, count, pooling);
         errdefer rt.allocator.destroy(provision_pool);
 
         const connection_count = try rt.allocator.create(usize);
@@ -496,6 +492,14 @@ pub const Server = struct {
         errdefer rt.allocator.destroy(accept_queued);
         accept_queued.* = true;
 
+        // Use a Max Header Size of 8KiB same as Nginx, Tomcat and Httpd but
+        // consider making this configurable
+        // https://stackoverflow.com/questions/686217/maximum-on-http-header-values
+        const max_http_header_size = 1024 * 8;
+        const pool_header_buffer: []u8 = try rt.allocator.alloc(u8, count * max_http_header_size);
+        errdefer rt.allocator.free(pool_header_buffer);
+        var next_header_buffer_index: usize = 0;
+
         // initialize first batch of provisions :)
         for (provision_pool.items) |*provision| {
             provision.initalized = true;
@@ -505,15 +509,17 @@ pub const Server = struct {
             ) catch {
                 @panic("attempting to allocate more memory than available. (ZeroCopy)");
             };
-            provision.header_buffer = std.ArrayList(u8).init(rt.allocator);
-            provision.arena = std.heap.ArenaAllocator.init(rt.allocator);
+            provision.header_writer = .fixed(pool_header_buffer[next_header_buffer_index..][0..max_http_header_size]);
+            next_header_buffer_index += max_http_header_size;
+
+            provision.arena = .init(rt.allocator);
             provision.captures = rt.allocator.alloc(Capture, self.config.capture_count_max) catch {
                 @panic("attempting to allocate more memory than available. (Captures)");
             };
-            provision.queries = AnyCaseStringMap.init(rt.allocator);
-            provision.storage = TypedStorage.init(rt.allocator);
-            provision.request = Request.init(rt.allocator);
-            provision.response = Response.init(rt.allocator);
+            provision.queries = .init(rt.allocator);
+            provision.storage = .init(rt.allocator);
+            provision.request = .init(rt.allocator);
+            provision.response = .init(rt.allocator);
         }
 
         try rt.spawn(

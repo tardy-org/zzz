@@ -1,5 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const testing = std.testing;
+const Io = std.Io;
 
 const day_names: []const []const u8 = &.{
     "Mon",
@@ -17,18 +19,18 @@ const Month = struct {
 };
 
 const months: []const Month = &.{
-    Month{ .name = "Jan", .days = 31 },
-    Month{ .name = "Feb", .days = 28 },
-    Month{ .name = "Mar", .days = 31 },
-    Month{ .name = "Apr", .days = 30 },
-    Month{ .name = "May", .days = 31 },
-    Month{ .name = "Jun", .days = 30 },
-    Month{ .name = "Jul", .days = 31 },
-    Month{ .name = "Aug", .days = 31 },
-    Month{ .name = "Sep", .days = 30 },
-    Month{ .name = "Oct", .days = 31 },
-    Month{ .name = "Nov", .days = 30 },
-    Month{ .name = "Dec", .days = 31 },
+    .{ .name = "Jan", .days = 31 },
+    .{ .name = "Feb", .days = 28 },
+    .{ .name = "Mar", .days = 31 },
+    .{ .name = "Apr", .days = 30 },
+    .{ .name = "May", .days = 31 },
+    .{ .name = "Jun", .days = 30 },
+    .{ .name = "Jul", .days = 31 },
+    .{ .name = "Aug", .days = 31 },
+    .{ .name = "Sep", .days = 30 },
+    .{ .name = "Oct", .days = 31 },
+    .{ .name = "Nov", .days = 30 },
+    .{ .name = "Dec", .days = 31 },
 };
 
 pub const Date = struct {
@@ -63,8 +65,7 @@ pub const Date = struct {
             return try std.fmt.allocPrint(allocator, format, date);
         }
 
-        pub fn into_writer(date: HTTPDate, writer: anytype) !void {
-            assert(std.meta.hasMethod(@TypeOf(writer), "print"));
+        pub fn into_writer(date: HTTPDate, writer: *Io.Writer) !void {
             try writer.print(format, date);
         }
     };
@@ -72,7 +73,7 @@ pub const Date = struct {
     ts: i64,
 
     pub fn init(ts: i64) Date {
-        return Date{ .ts = ts };
+        return .{ .ts = ts };
     }
 
     fn is_leap_year(year: i64) bool {
@@ -108,7 +109,7 @@ pub const Date = struct {
         const minute: u8 = @intCast(@mod(@divFloor(remsecs, 60), 60));
         const second: u8 = @intCast(@mod(remsecs, 60));
 
-        return HTTPDate{
+        return .{
             .day_name = day_names[@intCast(week_day)],
             .day = @intCast(day),
             .month = months[month].name,
@@ -120,19 +121,17 @@ pub const Date = struct {
     }
 };
 
-const testing = std.testing;
-
 test "Parse Basic Date (Buffer)" {
     const ts = 1727411110;
-    var date: Date = Date.init(ts);
-    var buffer = [_]u8{0} ** 29;
+    var date: Date = .init(ts);
+    var buffer: [29]u8 = @splat(0);
     const http_date = date.to_http_date();
     try testing.expectEqualStrings("Fri, 27 Sep 2024 04:25:10 GMT", try http_date.into_buf(buffer[0..]));
 }
 
 test "Parse Basic Date (Alloc)" {
     const ts = 1727464105;
-    var date: Date = Date.init(ts);
+    var date: Date = .init(ts);
     const http_date = date.to_http_date();
     const http_string = try http_date.into_alloc(testing.allocator);
     defer testing.allocator.free(http_string);
@@ -141,11 +140,11 @@ test "Parse Basic Date (Alloc)" {
 
 test "Parse Basic Date (Writer)" {
     const ts = 672452112;
-    var date: Date = Date.init(ts);
+    var date: Date = .init(ts);
     const http_date = date.to_http_date();
-    var buffer = [_]u8{0} ** 29;
-    var stream = std.io.fixedBufferStream(buffer[0..]);
-    try http_date.into_writer(stream.writer());
-    const http_string = stream.getWritten();
+    var buffer: [29]u8 = @splat(0);
+    var stream_w: Io.Writer = .fixed(&buffer);
+    try http_date.into_writer(&stream_w);
+    const http_string = stream_w.buffered();
     try testing.expectEqualStrings("Wed, 24 Apr 1991 00:15:12 GMT", http_string);
 }

@@ -1,11 +1,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const testing = std.testing;
 
 const AnyCaseStringMap = @import("../core/any_case_string_map.zig").AnyCaseStringMap;
 const Context = @import("context.zig").Context;
 
 pub fn decode_alloc(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
-    var list = try std.ArrayListUnmanaged(u8).initCapacity(allocator, input.len);
+    var list: std.ArrayList(u8) = try .initCapacity(allocator, input.len);
     defer list.deinit(allocator);
 
     var input_index: usize = 0;
@@ -98,7 +99,7 @@ fn construct_map_from_body(allocator: std.mem.Allocator, m: *AnyCaseStringMap, b
 pub fn Form(comptime T: type) type {
     return struct {
         pub fn parse(allocator: std.mem.Allocator, ctx: *const Context) !T {
-            var m = AnyCaseStringMap.init(ctx.allocator);
+            var m: AnyCaseStringMap = .init(ctx.allocator);
             defer {
                 var it = m.iterator();
                 while (it.next()) |entry| {
@@ -127,14 +128,12 @@ pub fn Query(comptime T: type) type {
     };
 }
 
-const testing = std.testing;
-
 test "FormData: Parsing from Body" {
     const UserRole = enum { admin, visitor };
     const User = struct { id: u32, name: []const u8, age: u8, role: UserRole };
     const body: []const u8 = "id=10&name=John&age=12&role=visitor";
 
-    var m = AnyCaseStringMap.init(testing.allocator);
+    var m: AnyCaseStringMap = .init(testing.allocator);
     defer {
         var it = m.iterator();
         while (it.next()) |entry| {
@@ -158,7 +157,7 @@ test "FormData: Parsing Missing Fields" {
     const User = struct { id: u32, name: []const u8, age: u8 };
     const body: []const u8 = "id=10";
 
-    var m = AnyCaseStringMap.init(testing.allocator);
+    var m: AnyCaseStringMap = .init(testing.allocator);
     defer {
         var it = m.iterator();
         while (it.next()) |entry| {
@@ -177,7 +176,7 @@ test "FormData: Parsing Missing Fields" {
 test "FormData: Parsing Missing Value" {
     const body: []const u8 = "abc=abc&id=";
 
-    var m = AnyCaseStringMap.init(testing.allocator);
+    var m: AnyCaseStringMap = .init(testing.allocator);
     defer {
         var it = m.iterator();
         while (it.next()) |entry| {

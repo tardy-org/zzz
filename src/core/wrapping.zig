@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const testing = std.testing;
 
 /// Special values for Wrapped types.
 const Wrapped = enum(usize) { null = 0, true = 1, false = 2, void = 3 };
@@ -113,8 +114,6 @@ pub fn unwrap(comptime T: type, value: anytype) T {
         }
     };
 }
-
-const testing = std.testing;
 
 test "wrap/unwrap - integers" {
     try testing.expectEqual(@as(usize, 42), wrap(usize, @as(u8, 42)));

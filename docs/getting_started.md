@@ -39,19 +39,22 @@ pub fn main() !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
+    var gpa: std.heap.DebugAllocator(.{ .thread_safe = true }) = .init;
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
-    var t = try Tardy.init(allocator, .{ .threading = .auto });
+    var t: Tardy = try .init(allocator, .{ .threading = .auto });
     defer t.deinit();
 
-    var router = try Router.init(allocator, &.{
+    var router: Router = try .init(allocator, &.{
         Route.init("/").get({}, base_handler).layer(),
     }, .{});
     defer router.deinit(allocator);
 
-    var socket = try Socket.init(.{ .tcp = .{ .host = host, .port = port } });
+    // create socket for tardy
+    var socket: Socket = try .init(.{
+        .tcp = .{ .host = host, .port = port },
+    });
     defer socket.close_blocking();
     try socket.bind();
     try socket.listen(4096);
@@ -65,7 +68,7 @@ pub fn main() !void {
         EntryParams{ .router = &router, .socket = socket },
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
-                var server = Server.init(.{
+                var server: Server = .init(.{
                     .stack_size = 1024 * 1024 * 4,
                     .socket_buffer_bytes = 1024 * 2,
                     .keepalive_count_max = null,
@@ -78,4 +81,4 @@ pub fn main() !void {
 }
 ```
 
-The snippet above handles all of the basic tasks involved with serving a plaintext route using zzz's HTTP implementation. 
+The snippet above handles all of the basic tasks involved with serving a plaintext route using zzz's HTTP implementation.
