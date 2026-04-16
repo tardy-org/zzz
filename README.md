@@ -5,9 +5,7 @@
 ## Installing
 Compatible Zig Version: `0.15.2`
 
-Compatible [tardy](https://github.com/tardy-org/tardy) Version: `v0.3.1`
-
-Compatible [secsock](https://github.com/tardy-org/tardy) Version: `v0.1.1`
+Compatible [tardy](https://github.com/tardy-org/tardy) Version is `v0.3.1` and [secsock](https://github.com/tardy-org/secsock) `v0.1.1`
 
 Latest Release: `0.3.1`
 ```
