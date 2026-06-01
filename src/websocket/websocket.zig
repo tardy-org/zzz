@@ -18,24 +18,53 @@ pub const Conn = struct {
     //allocator: Allocator, // maybe todo - and pass with on_upgrade
     //compression: bool,
     
-    pub fn send(self: Conn, data: []const u8) !void {
-        var buf = std.ArrayList(u8).init(self.runtime.allocator);
-        defer buf.deinit();
+    //pub fn send(self: Conn, data: []const u8) !void {
+    //    var buf = std.ArrayList(u8).init(self.runtime.allocator);
+    //    defer buf.deinit();
         
         //try writeFrameHeader(buf.writer(), .text, data.len, true);
-        try writeFrameHeader(buf.writer(), .text, data.len, false);
-        try buf.appendSlice(data);
-        _ = try self.socket.send_all(self.runtime, buf.items);
+    //    try writeFrameHeader(buf.writer(), .text, data.len, false);
+    //    try buf.appendSlice(data);
+    //    _ = try self.socket.send_all(self.runtime, buf.items);
+    //}
+    
+    //pub fn sendBinary(self: Conn, binary_data: []const u8) !void {
+    //    var buf = std.ArrayList(u8).init(self.runtime.allocator);
+    //    defer buf.deinit();
+        
+    //    try writeFrameHeader(buf.writer(), .binary, binary_data.len, false);
+    //    try buf.appendSlice(binary_data);
+    //    _ = try self.socket.send_all(self.runtime, buf.items);
+    //}
+    
+    pub fn send(self: Conn, data: []const u8) !void {
+      try self.writeFrame(.text, data);
     }
     
     pub fn sendBinary(self: Conn, binary_data: []const u8) !void {
-        var buf = std.ArrayList(u8).init(self.runtime.allocator);
-        defer buf.deinit();
-        
-        try writeFrameHeader(buf.writer(), .binary, binary_data.len, false);
-        try buf.appendSlice(binary_data);
-        _ = try self.socket.send_all(self.runtime, buf.items);
-        
+      try self.writeFrame(.binary, binary_data);
+    }
+    
+    fn writeFrame(self: Conn, opcode: OpCode, data: []const u8) !void {
+      var header: [10]u8 = undefined;
+      const f_byte: u8 = @intFromEnum(opcode) | 0x80;
+      header[0] = f_byte;
+      
+      var h_len: usize = 2;
+      if (data.len < 126) {
+        header[1] = @intCast(data.len);
+      } else if (data.len <= 0xFFFF) {
+        header[1] = 126;
+        std.mem.writeInt(u16, header[2..4], @intCast(data.len), .big);
+        h_len = 4;
+      } else {
+        header[1] = 127;
+        std.mem.writeInt(u64, header[2..10], data.len, .big);
+        h_len = 10;
+      }
+      
+      _ = try self.socket.send_all(self.runtime, header[0..h_len]);
+      _ = try self.socket.send_all(self.runtime, data);
     }
     
     pub fn close(self: Conn, code: u16, reason: []const u8) !void {
@@ -200,12 +229,44 @@ pub fn runLoop(conn: Conn, handler: Handler, allocator: Allocator) !void {
           const payload_start = start_idx + header_len;
           const payload = data[payload_start .. payload_start + payload_len];
           
+          //if (has_mask) { // unmask
+          //  var j: usize = 0;
+          //  while (j < payload_len) : (j += 1) {
+          //    payload[j] ^= mask[j % 4];
+          //  }
+          //}
+          
           if (has_mask) { // unmask
             var j: usize = 0;
-            while (j < payload_len) : (j += 1) {
+            const is_little = @import("builtin").target.cpu.arch.endian() == .little;
+            
+            const m64 = if (is_little) blk: { // 64-bits unmasking for little-or-big-endian - compiler knows in comptime
+              // mask[0] is least-significant byte u32 in little-endian
+              const m32 = @as(u32, mask[0]) |
+                         (@as(u32, mask[1]) << 8) |
+                         (@as(u32, mask[2]) << 16) |
+                         (@as(u32, mask[3]) << 24);
+              break :blk (@as(u64, m32) << 32) | m32;
+            } else blk: {
+              // mask[0] is most-significant byte u32 in big-endian
+              const m32 = (@as(u32, mask[0]) << 24) |
+                          (@as(u32, mask[1]) << 16) |
+                          (@as(u32, mask[2]) << 8) |
+                          @as(u32, mask[3]);
+              break :blk  (@as(u64, m32) << 32) | m32;
+            };
+            
+            while (j + 8 <= payload_len) : (j += 8) { // process every 8 bytes once
+              const val = std.mem.readInt(u64, payload[j..][0..8], if (is_little) .little else .big);
+              std.mem.writeInt(u64, payload[j..][0..8], val ^ m64, if (is_little) .little else .big);
+            }
+            
+            while (j < payload_len) : (j += 1) { // rest (< 8 bytes)
               payload[j] ^= mask[j % 4];
             }
+          
           }
+          
           
           // Compression (permessage-deflate) // todo
           if (rsv1) return error.CompressionNotNegotiated;
@@ -331,15 +392,31 @@ pub fn runLoop(conn: Conn, handler: Handler, allocator: Allocator) !void {
           process_offset += total_frame_len; // shift offset
         } // while ends - processed collected
         
+        //if (process_offset > 0) { // clean frame buffer // maybe todo RingBuffer
+        //  const remaining = data.len - process_offset;
+        //  if (remaining == 0) {
+        //    stash.clearRetainingCapacity();
+        //  } else {
+        //    std.mem.copyForwards(u8, stash.items[0..remaining], stash.items[process_offset..]); // mv tail to begin
+        //    stash.shrinkRetainingCapacity(remaining);
+        //  }
+        //}
+        
+        
         if (process_offset > 0) { // clean frame buffer // maybe todo RingBuffer
           const remaining = data.len - process_offset;
           if (remaining == 0) {
             stash.clearRetainingCapacity();
-          } else {
-            std.mem.copyForwards(u8, stash.items[0..remaining], stash.items[process_offset..]); // mv tail to begin
+          //} else if (process_offset > 8192 or remaining < process_offset) { // copy if 8kb(+) or remaing too less than offset
+          //  std.mem.copyForwards(u8, stash.items[0..remaining], stash.items[process_offset..]);
+          //  stash.shrinkRetainingCapacity(remaining);
+          } else { // maybe todo use more big buffer (at this function beginning) without reallocations
+            //std.mem.copyForwards(u8, stash.items[0..remaining], stash.items[process_offset..]);
+            @memcpy(stash.items[0..remaining], stash.items[process_offset..]);
             stash.shrinkRetainingCapacity(remaining);
           }
         }
+        
     
     }
 }
