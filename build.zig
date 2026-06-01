@@ -25,16 +25,17 @@ pub fn build(b: *std.Build) void {
 
     zzz.addImport("secsock", secsock);
 
-    add_example(b, "basic", false, target, optimize, zzz);
-    add_example(b, "cookies", false, target, optimize, zzz);
-    add_example(b, "form", false, target, optimize, zzz);
-    add_example(b, "fs", false, target, optimize, zzz);
-    add_example(b, "middleware", false, target, optimize, zzz);
-    add_example(b, "sse", false, target, optimize, zzz);
-    add_example(b, "tls", true, target, optimize, zzz);
+    const all_http_examples_step = b.step("examples_http", "Build all HTTP examples");
+    add_http_example(b, all_http_examples_step, "basic", false, target, optimize, zzz);
+    add_http_example(b, all_http_examples_step, "cookies", false, target, optimize, zzz);
+    add_http_example(b, all_http_examples_step, "form", false, target, optimize, zzz);
+    add_http_example(b, all_http_examples_step, "fs", false, target, optimize, zzz);
+    add_http_example(b, all_http_examples_step, "middleware", false, target, optimize, zzz);
+    add_http_example(b, all_http_examples_step, "sse", false, target, optimize, zzz);
+    add_http_example(b, all_http_examples_step, "tls", true, target, optimize, zzz);
 
     if (target.result.os.tag != .windows) {
-        add_example(b, "unix", false, target, optimize, zzz);
+        add_http_example(b, all_http_examples_step, "unix", false, target, optimize, zzz);
     }
     
     
@@ -110,8 +111,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_test.step);
 }
 
-fn add_example(
+fn add_http_example(
     b: *std.Build,
+    all_http_examples_step: *std.Build.Step,
     name: []const u8,
     link_libc: bool,
     target: std.Build.ResolvedTarget,
@@ -134,6 +136,8 @@ fn add_example(
 
     const install_artifact = b.addInstallArtifact(example, .{});
     b.getInstallStep().dependOn(&install_artifact.step);
+
+    all_http_examples_step.dependOn(&install_artifact.step);
 
     const build_step = b.step(b.fmt("{s}", .{name}), b.fmt("Build zzz example ({s})", .{name}));
     build_step.dependOn(&install_artifact.step);
