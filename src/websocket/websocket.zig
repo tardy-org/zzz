@@ -47,8 +47,7 @@ pub const Conn = struct {
     
     fn writeFrame(self: Conn, opcode: OpCode, data: []const u8) !void {
       var header: [10]u8 = undefined;
-      const f_byte: u8 = @intFromEnum(opcode) | 0x80;
-      header[0] = f_byte;
+      header[0] = @intFromEnum(opcode) | 0x80;
       
       var h_len: usize = 2;
       if (data.len < 126) {
