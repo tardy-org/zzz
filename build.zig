@@ -122,7 +122,7 @@ fn add_http_example(
 ) void {
     const example = b.addExecutable(.{
         .name = name,
-        .root_source_file = b.path(b.fmt("./examples/{s}/main.zig", .{name})),
+        .root_source_file = b.path(b.fmt("./examples_http/{s}/main.zig", .{name})),
         .target = target,
         .optimize = optimize,
         .strip = false,
@@ -134,7 +134,8 @@ fn add_http_example(
 
     example.root_module.addImport("zzz", zzz_module);
 
-    const install_artifact = b.addInstallArtifact(example, .{});
+    //const install_artifact = b.addInstallArtifact(example, .{});
+    const install_artifact = b.addInstallBinFile(example.getEmittedBin(), b.fmt("../../{s}", .{name})); //  to project root
     b.getInstallStep().dependOn(&install_artifact.step);
 
     all_http_examples_step.dependOn(&install_artifact.step);
