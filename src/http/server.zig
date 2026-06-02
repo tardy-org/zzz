@@ -349,26 +349,25 @@ pub const Server = struct {
             
             .handler => {
                 
-                const request_text = provision.zc_recv_buffer.as_slice();
-                var request = Request.init(rt.allocator);
-                request.parse_headers(request_text, .{
-                  .request_bytes_max = config.request_bytes_max,
-                  .request_uri_bytes_max = config.request_uri_bytes_max,
-                }) catch |e| {
-                  log.debug("malformed request| {}", .{e});
-                  break :http_loop;
-                };
+                //const request_text = provision.zc_recv_buffer.as_slice();
+                //var request = Request.init(rt.allocator);
+                //request.parse_headers(request_text, .{
+                //  .request_bytes_max = config.request_bytes_max,
+                //  .request_uri_bytes_max = config.request_uri_bytes_max,
+                //}) catch |e| {
+                //  log.debug("malformed request| {}", .{e});
+                //  break :http_loop;
+                //};
                 
+                var request = &provision.request;
                 
                 if (config.on_upgrade) |on_upgrade| { // check is this WebSocket upgrade
                   request.socket = &secure;
                   request.runtime = rt;
                   
-                  const upgrade_header = request.headers.get("Upgrade");
-                  if (upgrade_header) |upgrade| {
-                    
+                  if (request.headers.get("Upgrade")) |upgrade| {
                     if (std.mem.eql(u8, upgrade, "websocket")) {
-                      if (try on_upgrade(&request, upgrade)) {
+                      if (try on_upgrade(request, upgrade)) {
                         continue :http_loop;
                       }
                     }
