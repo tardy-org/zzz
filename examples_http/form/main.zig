@@ -19,6 +19,10 @@ const Respond = http.Respond;
 
 fn base_handler(ctx: *const Context, _: void) !Respond {
     const body =
+        \\<!DOCTYPE html>
+        \\<html>
+        \\<head><meta charset="UTF-8"></head>
+        \\<body>
         \\<form>
         \\    <label for="fname">First name:</label>
         \\    <input type="text" id="fname" name="fname"><br><br>
@@ -30,7 +34,9 @@ fn base_handler(ctx: *const Context, _: void) !Respond {
         \\    <input type="text" id="height" name="height"><br><br>
         \\    <button formaction="/generate" formmethod="get">GET Submit</button>
         \\    <button formaction="/generate" formmethod="post">POST Submit</button>
-        \\</form> 
+        \\</form>
+        \\</body>
+        \\</html>
     ;
 
     return ctx.response.apply(.{
@@ -72,6 +78,9 @@ fn generate_handler(ctx: *const Context, _: void) !Respond {
     return ctx.response.apply(.{
         .status = .OK,
         .mime = http.Mime.TEXT,
+        .headers = &.{
+            .{ "Content-Type", "text/plain; charset=utf-8" },
+        },
         .body = body,
     });
 }
