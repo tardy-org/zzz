@@ -1,5 +1,5 @@
 const std = @import("std");
-const log = std.log.scoped(.@"examples/tls");
+const log = std.log.scoped(.@"examples_http/tls");
 
 const zzz = @import("zzz");
 const http = zzz.HTTP;
