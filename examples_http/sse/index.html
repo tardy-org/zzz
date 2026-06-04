@@ -52,12 +52,13 @@
                 method: 'POST',
             })
             .then(response => response.json()) // Adjust based on your server response
+            //.then(response => { console.log(response); return response.json() }) // Adjust based on your server response
             .then(data => {
-                console.log('Message sent:', data); // Handle successful response
+                console.log('Message sent: ', data); // Handle successful response
                 this.reset(); // Clear the form
             })
             .catch(error => {
-                console.error('Error sending message:', error); // Handle any errors
+                console.error('Error sending message: ', error); // Handle any errors
             });
         });
 

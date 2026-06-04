@@ -28,6 +28,21 @@ fn sse_handler(ctx: *const Context, _: void) !Respond {
     return .responded;
 }
 
+fn post_handler(ctx: *const Context, _: void) !Respond {
+    const body = std.json.stringifyAlloc(ctx.allocator, .{
+        .id = 1,
+        .message = "hello from post handler",
+    }, .{}) catch unreachable;
+    defer ctx.allocator.free(body);
+    
+    return ctx.response.apply(.{
+        .status = .OK,
+        //.mime = http.Mime.TEXT,
+        .mime = http.Mime.JSON,
+        .body = body,
+    });
+}
+
 pub fn main() !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
@@ -42,6 +57,7 @@ pub fn main() !void {
     const router = try Router.init(allocator, &.{
         Route.init("/").embed_file(.{ .mime = http.Mime.HTML }, @embedFile("./index.html")).layer(),
         Route.init("/stream").get({}, sse_handler).layer(),
+        Route.init("/message").post({}, post_handler).layer(),
     }, .{});
 
     // create socket for tardy
