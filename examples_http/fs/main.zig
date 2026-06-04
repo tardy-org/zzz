@@ -49,7 +49,7 @@ pub fn main() !void {
     var t = try Tardy.init(allocator, .{ .threading = .auto });
     defer t.deinit();
 
-    const static_dir = Dir.from_std(try std.fs.cwd().openDir("examples/fs/static", .{}));
+    const static_dir = Dir.from_std(try std.fs.cwd().openDir("examples_http/fs/static", .{}));
 
     var router = try Router.init(allocator, &.{
         Compression(.{ .gzip = .{} }),
