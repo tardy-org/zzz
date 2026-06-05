@@ -47,31 +47,55 @@ fn base_handler(ctx: *const Context, _: void) !Respond {
 }
 
 const UserInfo = struct {
-    fname: []const u8,
-    mname: []const u8 = "Middle",
-    lname: []const u8,
-    age: u8,
-    height: f32,
-    weight: ?[]const u8,
+    fname: ?[]const u8 = null,
+    mname: ?[]const u8 = "Middle",
+    lname: ?[]const u8 = null,
+    age: ?[]const u8 = null,
+    height: ?[]const u8 = null,
+    weight: ?[]const u8 = null,
 };
 
 fn generate_handler(ctx: *const Context, _: void) !Respond {
+    //std.debug.print("Handler entered, method: {any}\n", .{ctx.request.method});
     const info = switch (ctx.request.method.?) {
-        .GET => try Query(UserInfo).parse(ctx.allocator, ctx),
-        .POST => try Form(UserInfo).parse(ctx.allocator, ctx),
+        .GET => Query(UserInfo).parse(ctx.allocator, ctx) catch |err| {
+            std.debug.print("Query parse failed: {}\n", .{err});
+            return ctx.response.apply(.{
+                .status = .@"Bad Request",
+                .mime = http.Mime.TEXT,
+                .headers = &.{ .{ "Content-Type", "text/plain; charset=utf-8" } },
+                .body = "Invalid or empty query parameters",
+            });
+        },
+        .POST => Form(UserInfo).parse(ctx.allocator, ctx) catch |err| {
+            std.debug.print("Form parse failed: {}\n", .{err});
+            return ctx.response.apply(.{
+                .status = .@"Bad Request",
+                .mime = http.Mime.TEXT,
+                .headers = &.{ .{ "Content-Type", "text/plain; charset=utf-8" } },
+                .body = "Invalid or empty form data",
+            });
+        },
         else => return error.UnexpectedMethod,
     };
+
+    const fname = info.fname orelse "";
+    const mname = info.mname orelse "Middle";
+    const lname = info.lname orelse "";
+    const age = if (info.age) |v| std.fmt.parseInt(u8, v, 10) catch 0 else 0;
+    const height = if (info.height) |v| std.fmt.parseFloat(f32, v) catch 0.0 else 0.0;
+    const weight = if (info.weight) |w| if (w.len == 0) "none" else w else "none";
 
     const body = try std.fmt.allocPrint(
         ctx.allocator,
         "First: {s} | Middle: {s} | Last: {s} | Age: {d} | Height: {d} | Weight: {s}",
         .{
-            info.fname,
-            info.mname,
-            info.lname,
-            info.age,
-            info.height,
-            info.weight orelse "none",
+          if (fname.len == 0) "(empty)" else fname,
+          if (mname.len == 0) "Middle" else mname,
+          if (lname.len == 0) "(empty)" else lname,
+          age,
+          height,
+          weight,
         },
     );
 

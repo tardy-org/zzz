@@ -70,7 +70,7 @@ fn construct_map_from_body(allocator: std.mem.Allocator, m: *AnyCaseStringMap, b
 
     while (pairs.next()) |pair| {
         const field_idx = std.mem.indexOfScalar(u8, pair, '=') orelse return error.MissingSeperator;
-        if (pair.len < field_idx + 2) return error.MissingValue;
+        //if (pair.len < field_idx + 2) return error.MissingValue; // this makes problem as cannot get emply values when submit POST request with empty form values
 
         const key = pair[0..field_idx];
         const value = pair[(field_idx + 1)..];

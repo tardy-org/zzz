@@ -274,7 +274,7 @@ pub const RoutingTrie = struct {
 
                 while (query_iter.next()) |chunk| {
                     const field_idx = std.mem.indexOfScalar(u8, chunk, '=') orelse return error.MissingValue;
-                    if (chunk.len < field_idx + 2) return error.MissingValue;
+                    //if (chunk.len < field_idx + 2) return error.MissingValue; // this makes problem as connection_refused when submit GET request with empty form values
 
                     const key = chunk[0..field_idx];
                     const value = chunk[(field_idx + 1)..];
