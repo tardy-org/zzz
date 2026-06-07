@@ -130,8 +130,7 @@ pub const CookieMap = struct {
         while (pairs.next()) |pair| {
             var kv = std.mem.splitScalar(u8, pair, '=');
             const key = kv.next() orelse continue;
-            const value = kv.next() orelse continue;
-            if (kv.next() != null) continue;
+            const value = kv.rest();
 
             const key_dup = try self.allocator.dupe(u8, key);
             errdefer self.allocator.free(key_dup);
@@ -150,9 +149,10 @@ test "Cookie: Header Parsing" {
     var cookie_map: CookieMap = .init(testing.allocator);
     defer cookie_map.deinit();
 
-    try cookie_map.parse_from_header("sessionId=abc123; java=slop");
+    try cookie_map.parse_from_header("sessionId=abc123; java=slop; foo=bar=baz");
     try testing.expectEqualStrings("abc123", cookie_map.get("sessionId").?);
     try testing.expectEqualStrings("slop", cookie_map.get("java").?);
+    try testing.expectEqualStrings("bar=baz", cookie_map.get("foo").?);
 }
 
 test "Cookie: Response Formatting" {
