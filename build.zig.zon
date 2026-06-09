@@ -2,7 +2,7 @@
     .name = .zzz,
     .fingerprint = 0xc3273dca261a7ae0,
     .version = "0.3.1",
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .tardy = .{
             .url = "https://github.com/tardy-org/tardy/archive/8284a3fcd7843e5e15f31a46cc70956d95a48100.tar.gz",
