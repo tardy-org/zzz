@@ -22,30 +22,26 @@ fn sse_handler(ctx: *const Context, _: void) !Respond {
 
     while (true) {
         sse.send(.{ .data = "hello from handler!" }) catch break;
-        try Timer.delay(ctx.runtime, .{ .seconds = 1 });
+        try Timer.delay(ctx.runtime, .{ .nanoseconds = 1 * std.time.ns_per_s });
     }
 
     return .responded;
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
-
-    var t: Tardy = try .init(allocator, .{ .threading = .single });
+    var t: Tardy = try .init(init.gpa, init.io, .{ .threading = .single });
     defer t.deinit();
 
-    const router: Router = try .init(allocator, &.{
+    const router: Router = try .init(init.gpa, &.{
         Route.init("/").embed_file(.{ .mime = .HTML }, @embedFile("./index.html")).layer(),
         Route.init("/stream").get({}, sse_handler).layer(),
     }, .{});
 
     // create socket for tardy
-    var socket: Socket = try .init(.{ .tcp = .{ .host = host, .port = port } });
+    var socket: Socket = try .init(init.io, .{ .tcp = .{ .host = host, .port = port } });
     defer socket.close_blocking();
     try socket.bind();
     try socket.listen(256);

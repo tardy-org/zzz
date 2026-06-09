@@ -25,27 +25,24 @@ pub fn root_handler(ctx: *const Context, _: void) !Respond {
 }
 
 // Test With: curl --unix-socket /tmp/zzz.sock http://localhost/
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{ .thread_safe = true }) = .init;
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
-
-    var t: Tardy = try .init(allocator, .{ .threading = .auto });
+pub fn main(init: std.process.Init) !void {
+    var t: Tardy = try .init(init.gpa, init.io, .{ .threading = .auto });
     defer t.deinit();
 
-    var router: Router = try .init(allocator, &.{
+    var router: Router = try .init(init.gpa, &.{
         Route.init("/").get({}, root_handler).layer(),
     }, .{});
-    defer router.deinit(allocator);
+    defer router.deinit(init.gpa);
 
     const EntryParams = struct {
         router: *const Router,
         socket: Socket,
     };
 
-    var socket: Socket = try .init(.{ .unix = "/tmp/zzz.sock" });
-    defer std.fs.deleteFileAbsolute("/tmp/zzz.sock") catch unreachable;
+    var socket: Socket = try .init(init.io, .{ .unix = "/tmp/zzz.sock" });
+    defer std.Io.Dir.deleteDirAbsolute(init.io, "/tmp/zzz.sock") catch unreachable;
     defer socket.close_blocking();
+
     try socket.bind();
     try socket.listen(256);
 
