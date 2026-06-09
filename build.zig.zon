@@ -5,12 +5,12 @@
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .tardy = .{
-            .url = "git+https://github.com/tardy-org/tardy?ref=v0.3.1#f36525f9b36159bb9196ccb1734a67b55ba2c1ca",
-            .hash = "tardy-0.3.1-69wrgn77AwCO0ma2a0hOPgreoJogu-uYWlcgo2TgkgBO",
+            .url = "https://github.com/tardy-org/tardy/archive/8284a3fcd7843e5e15f31a46cc70956d95a48100.tar.gz",
+            .hash = "tardy-0.3.1-69wrgh68BQDNSyDZNQagPSGQ2MO7O3XOTTq1MZbADWYl",
         },
         .secsock = .{
-            .url = "git+https://github.com/tardy-org/secsock?ref=0.1.1#c70d26cdf6ce7c23967b1b86c3f129c93f1b0e1c",
-            .hash = "secsock-0.1.1-p0qurVNGAQCyOjL0v1wE89Y5VPCqkQY5O3SirlKtP7BC",
+            .url = "git+https://github.com/tardy-org/secsock?ref=zig-0.16.0#53c6e4c11ce2dfd386f3961f2e2ccaad41cb54c9",
+            .hash = "secsock-0.1.1-p0qurXZIAQA1hYfNEWjzaSSYI2b5uzcR9lSOzVRNimoE",
         },
     },
     .paths = .{
