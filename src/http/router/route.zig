@@ -34,11 +34,11 @@ pub const Route = struct {
     path: []const u8,
 
     /// Route Handlers.
-    handlers: [9]?HandlerWithData = .{null} ** 9,
+    handlers: [9]?HandlerWithData = @splat(null),
 
     /// Initialize a route for the given path.
     pub fn init(path: []const u8) Route {
-        return Route{ .path = path };
+        return .{ .path = path };
     }
 
     /// Returns a comma delinated list of allowed Methods for this route. This
@@ -98,7 +98,10 @@ pub const Route = struct {
             .data = wrapped,
         };
 
-        return Route{ .path = self.path, .handlers = new_handlers };
+        return .{
+            .path = self.path,
+            .handlers = new_handlers,
+        };
     }
 
     /// Set a handler function for all methods.
@@ -114,7 +117,7 @@ pub const Route = struct {
             };
         }
 
-        return Route{
+        return .{
             .path = self.path,
             .handlers = new_handlers,
         };

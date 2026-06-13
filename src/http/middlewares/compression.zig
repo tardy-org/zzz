@@ -7,9 +7,12 @@ const Next = @import("../router/middleware.zig").Next;
 const Layer = @import("../router/middleware.zig").Layer;
 const TypedMiddlewareFn = @import("../router/middleware.zig").TypedMiddlewareFn;
 
-const Kind = union(enum) { gzip: struct {
-    level: flate.Compress.Level = .default,
-} };
+const Kind = union(enum) {
+    gzip: struct {
+        container: flate.Container = .gzip,
+        level: flate.Compress.Options = .default,
+    },
+};
 
 /// Compression Middleware.
 ///
@@ -17,18 +20,23 @@ const Kind = union(enum) { gzip: struct {
 /// will properly compress the body and add the proper `Content-Encoding` header.
 pub fn Compression(comptime compression: Kind) Layer {
     const func: TypedMiddlewareFn(void) = switch (compression) {
-        .gzip => |_| struct {
+        .gzip => |gzip| struct {
             fn gzip_mw(next: *Next, _: void) !Respond {
                 const respond = try next.run();
                 const response = next.context.response;
                 if (response.body) |body| if (respond == .standard) {
-                    var compressed: std.Io.Writer.Allocating = try .initCapacity(next.context.allocator, body.len);
+                    var compressed: std.Io.Writer.Allocating = try .initCapacity(
+                        next.context.allocator,
+                        body.len,
+                    );
                     errdefer compressed.deinit();
 
-                    var body_stream: flate.Compress = .init(&compressed.writer, &.{}, .{
-                        .level = compression.gzip.level,
-                        .container = .gzip,
-                    });
+                    var body_stream: flate.Compress = try .init(
+                        &compressed.writer,
+                        &.{},
+                        gzip.container,
+                        gzip.level,
+                    );
                     try body_stream.writer.writeAll(body);
                     try body_stream.writer.flush();
 

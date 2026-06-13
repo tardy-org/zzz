@@ -36,34 +36,35 @@ fn base_handler(ctx: *const Context, _: void) !Respond {
 }
 
 // Test With: http://localhost:9862/index.html
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var gpa: std.heap.DebugAllocator(.{ .thread_safe = true }) = .{
-        .backing_allocator = std.heap.smp_allocator,
-    };
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
-
-    var t: Tardy = try .init(allocator, .{ .threading = .auto });
+    var t: Tardy = try .init(init.gpa, init.io, .{ .threading = .auto });
     defer t.deinit();
 
-    const static_dir: Dir = .from_std(try std.fs.cwd().openDir("examples/fs/static", .{}));
+    const static_dir: Dir = .from_std(try std.Io.Dir.cwd().openDir(
+        init.io,
+        "examples/fs/static",
+        .{},
+    ));
 
-    var router: Router = try .init(allocator, &.{
+    var router: Router = try .init(init.gpa, &.{
         Compression(.{ .gzip = .{} }),
         Route.init("/").get({}, base_handler).layer(),
         FsDir.serve("/", static_dir),
     }, .{});
-    defer router.deinit(allocator);
+    defer router.deinit(init.gpa);
 
     const EntryParams = struct {
         router: *const Router,
         socket: Socket,
     };
 
-    var socket: Socket = try .init(.{ .tcp = .{ .host = host, .port = port } });
+    var socket: Socket = try .init(
+        init.io,
+        .{ .tcp = .{ .host = host, .port = port } },
+    );
     defer socket.close_blocking();
     try socket.bind();
     try socket.listen(256);

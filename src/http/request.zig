@@ -88,7 +88,7 @@ pub const Request = struct {
             } else {
                 var header_iter = std.mem.tokenizeScalar(u8, line, ':');
                 const key = header_iter.next() orelse return HTTPError.MalformedRequest;
-                const value = std.mem.trimLeft(u8, header_iter.rest(), &.{' '});
+                const value = std.mem.trimStart(u8, header_iter.rest(), &.{' '});
                 if (value.len == 0) return HTTPError.MalformedRequest;
                 try self.headers.put(key, value);
             }

@@ -202,7 +202,7 @@ pub const Server = struct {
         connection_count.* += 1;
         defer connection_count.* -= 1;
 
-        if (secure.socket.addr.any.family != std.posix.AF.UNIX) {
+        if (secure.socket.addr.family() != .unix) {
             try Cross.socket.disable_nagle(secure.socket.handle);
         }
 

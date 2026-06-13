@@ -38,20 +38,14 @@ fn root_handler(ctx: *const Context, _: void) !Respond {
     });
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var gpa: std.heap.DebugAllocator(.{ .thread_safe = true }) = .{
-        .backing_allocator = std.heap.smp_allocator,
-    };
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
-
-    var t: Tardy = try .init(allocator, .{ .threading = .auto });
+    var t: Tardy = try .init(init.gpa, init.io, .{ .threading = .auto });
     defer t.deinit();
 
-    var router: Router = try .init(allocator, &.{
+    var router: Router = try .init(init.gpa, &.{
         Route.init("/").get({}, root_handler).layer(),
         Compression(.{ .gzip = .{} }),
         Route.init("/embed/pico.min.css").embed_file(
@@ -59,15 +53,15 @@ pub fn main() !void {
             @embedFile("embed/pico.min.css"),
         ).layer(),
     }, .{});
-    defer router.deinit(allocator);
+    defer router.deinit(init.gpa);
 
     // create socket for tardy
-    var socket: Socket = try .init(.{ .tcp = .{ .host = host, .port = port } });
+    var socket: Socket = try .init(init.io, .{ .tcp = .{ .host = host, .port = port } });
     defer socket.close_blocking();
     try socket.bind();
     try socket.listen(1024);
 
-    var bearssl: secsock.BearSSL = .init(allocator);
+    var bearssl: secsock.BearSSL = .init(init.gpa);
     defer bearssl.deinit();
     try bearssl.add_cert_chain(
         "CERTIFICATE",

@@ -55,8 +55,7 @@ pub const FsDir = struct {
         var hash: std.hash.Wyhash = .init(0);
         hash.update(std.mem.asBytes(&stat.size));
         if (stat.modified) |modified| {
-            hash.update(std.mem.asBytes(&modified.seconds));
-            hash.update(std.mem.asBytes(&modified.nanos));
+            hash.update(std.mem.asBytes(&modified.nanoseconds));
         }
         const etag_hash = hash.final();
 
@@ -107,7 +106,7 @@ pub const FsDir = struct {
     pub fn serve(comptime url_path: []const u8, dir: Dir) Layer {
         const url_with_match_all = comptime std.fmt.comptimePrint(
             "{s}/%r",
-            .{std.mem.trimRight(u8, url_path, "/")},
+            .{std.mem.trimEnd(u8, url_path, "/")},
         );
         log.debug("url with match {s}", .{url_with_match_all});
 
