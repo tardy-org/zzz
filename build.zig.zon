@@ -1,7 +1,7 @@
 .{
     .name = .zzz,
     .fingerprint = 0xc3273dca261a7ae0,
-    .version = "0.3.1",
+    .version = "0.3.2",
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .tardy = .{
