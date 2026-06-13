@@ -4,7 +4,7 @@ zzz is a networking framework (HTTP) that allows for modularity and flexibility 
 For this guide, we will assume that you are running on a supported platform.
 This is the current latest release.
 
-`zig fetch --save git+https://github.com/mookums/zzz#v0.3.1`
+`zig fetch --save git+https://github.com/mookums/zzz#v0.3.2`
 
 ## Hello, World!
 We can write a quick example that serves out "Hello, World" responses to any client that connects to the server. This example is derived from the one that is provided within the `examples/basic` directory.
