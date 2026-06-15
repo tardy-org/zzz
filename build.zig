@@ -33,6 +33,7 @@ pub fn build(b: *std.Build) void {
     add_http_example(b, all_http_examples_step, "middleware", false, target, optimize, zzz);
     add_http_example(b, all_http_examples_step, "sse", false, target, optimize, zzz);
     add_http_example(b, all_http_examples_step, "tls", true, target, optimize, zzz);
+    add_http_example(b, all_http_examples_step, "rest", false, target, optimize, zzz);
 
     if (target.result.os.tag != .windows) {
         add_http_example(b, all_http_examples_step, "unix", false, target, optimize, zzz);
