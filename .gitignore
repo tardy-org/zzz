@@ -2,6 +2,15 @@ zig-out/
 .zig-cache/
 perf*.data*
 heaptrack*
+/basic
+/cookies
+/form
+/fs
+/middleware
+/rest
+/sse
+/tls
+/unix
 /ex_ws_1
 /ex_ws_2
 /ex_ws_3
