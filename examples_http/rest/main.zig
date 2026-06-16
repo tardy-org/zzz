@@ -116,25 +116,25 @@ pub fn main() !void {
   var tardy = try zzz.tardy.Tardy(.auto).init(allocator, .{});
   defer tardy.deinit();
   
-  try tardy.entry(&socket, struct {
-    fn entry(rt: *zzz.tardy.Runtime, s: *const Socket) !void {
-      const config = zzz.ServerConfig{ .stack_size = STACK_SIZE };
-      const router = try rt.allocator.create(zzz.Router);
-      router.* = try zzz.Router.init(rt.allocator, &.{
-        http.Route.init("/").get({}, on_request).post({}, on_request).layer(),
-      }, .{ .not_found = on_request });
-      
-      const provisions = try rt.allocator.create(zzz.tardy.Pool(zzz.Provision)); // use heap instead of stack
-      provisions.* = try zzz.tardy.Pool(zzz.Provision).init(rt.allocator, 1024, .static); // 1024 = pool size
-      @memset(std.mem.sliceAsBytes(provisions.items), 0); // set zeros -- initialized = false
-      
-      const conn_count = try rt.allocator.create(usize);
-      conn_count.* = 0;
-      const accept_q = try rt.allocator.create(bool);
-      accept_q.* = false;
-      
-      try rt.spawn(.{ rt, config, router, zzz.secsock.SecureSocket.unsecured(s.*), provisions, conn_count, accept_q }, zzz.Server.main_frame, config.stack_size);
-    } // end fn entry
-  }.entry);
+  const config = zzz.ServerConfig{ .stack_size = STACK_SIZE };
+  
+  const router = try zzz.Router.init(allocator, &.{
+    http.Route.init("/").get({}, on_request).post({}, on_request).layer(),
+  }, .{ .not_found = on_request });
+  
+  const Entry_Params = struct {
+    config: zzz.ServerConfig,
+    router: *const http.Router,
+    socket: Socket,
+  };
+  
+  try tardy.entry(
+    Entry_Params{ .config = config, .router = &router, .socket = socket },
+    struct {
+      fn entry(rt: *zzz.tardy.Runtime, p: Entry_Params) !void {
+        var server = zzz.Server.init(p.config);
+        try server.serve(rt, p.router, .{ .normal = p.socket });
+      } // end fn entry
+    }.entry);
 }
 
