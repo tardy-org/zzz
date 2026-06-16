@@ -116,8 +116,6 @@ pub fn main() !void {
   var tardy = try zzz.tardy.Tardy(.auto).init(allocator, .{});
   defer tardy.deinit();
   
-  const config = zzz.ServerConfig{ .stack_size = STACK_SIZE };
-  
   const router = try zzz.Router.init(allocator, &.{
     http.Route.init("/").get({}, on_request).post({}, on_request).layer(),
   }, .{ .not_found = on_request });
@@ -129,7 +127,7 @@ pub fn main() !void {
   };
   
   try tardy.entry(
-    Entry_Params{ .config = config, .router = &router, .socket = socket },
+    Entry_Params{ .config = .{ .stack_size = STACK_SIZE }, .router = &router, .socket = socket },
     struct {
       fn entry(rt: *zzz.tardy.Runtime, p: Entry_Params) !void {
         var server = zzz.Server.init(p.config);
