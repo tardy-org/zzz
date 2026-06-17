@@ -136,8 +136,7 @@ pub fn main() !void{
     try socket.bind();
     try socket.listen(1024); // max conn count that are waiting in accept queue
     
-    const TardyType = zzz.tardy.Tardy(.auto);
-    var tardy = try TardyType.init(allocator, .{});
+    var tardy = try zzz.tardy.Tardy(.auto).init(allocator, .{});
     //var tardy = try TardyType.init(allocator, .{ .threading = .single });
     defer tardy.deinit();
     

@@ -193,8 +193,7 @@ pub fn main() !void{
     const secure_socket = try bearssl.to_secure_socket(socket, .server);
     defer secure_socket.deinit();
     
-    const TardyType = zzz.tardy.Tardy(.auto);
-    var tardy = try TardyType.init(allocator, .{});
+    var tardy = try zzz.tardy.Tardy(.auto).init(allocator, .{});
     defer tardy.deinit();
     
     var server = zzz.Server.init(.{ .stack_size = STACK_SIZE });

@@ -505,44 +505,35 @@ pub fn main() !void {
     try socket.bind();
     try socket.listen(1024);
 
-    const TardyType = zzz.tardy.Tardy(.auto);
-    var tardy = try TardyType.init(allocator, .{});
+    const home_route = zzz.HTTP.Route.init("/").get({}, on_request);
+    const ws_route = zzz.HTTP.Route.init("/ws").get({}, on_ws_endpoint);
+    
+    //const js_route = zzz.HTTP.FsDir.serve("/static", zzz.tardy.Dir.cwd()); // bert_ftp.js
+    const std_static_dir = try std.fs.cwd().openDir("examples_ws/static", .{ .iterate = true });
+    const static_dir = zzz.tardy.Dir.from_std(std_static_dir);
+    const js_route = zzz.HTTP.FsDir.serve("/static", static_dir); // bert_ftp.js
+    
+    const layers = &[_]zzz.HTTP.Layer{ home_route.layer(), ws_route.layer(), js_route };
+    
+    const router = try zzz.Router.init(allocator, layers, .{ .not_found = on_request });
+
+    var tardy = try zzz.tardy.Tardy(.auto).init(allocator, .{});
     defer tardy.deinit();
+    
+    var server = zzz.Server.init(.{ .stack_size = WS_STACK_SIZE });
+    
+    const Entry_Params = struct {
+      server: *zzz.Server,
+      router: *const zzz.Router,
+      socket: Socket,
+    };
 
-    try tardy.entry(&socket, struct {
-        fn entry(rt: *zzz.tardy.Runtime, s: *const Socket) !void {
-            const server_config = zzz.ServerConfig{ .stack_size = 64 * 1024 };
-            
-            const home_route = zzz.HTTP.Route.init("/").get({}, on_request);
-            const ws_route = zzz.HTTP.Route.init("/ws").get({}, on_ws_endpoint);
-            
-            //const js_route = zzz.HTTP.FsDir.serve("/static", zzz.tardy.Dir.cwd()); // bert_ftp.js
-            const std_static_dir = try std.fs.cwd().openDir("examples_ws/static", .{ .iterate = true });
-            const static_dir = zzz.tardy.Dir.from_std(std_static_dir);
-            const js_route = zzz.HTTP.FsDir.serve("/static", static_dir); // bert_ftp.js
-            
-            const layers = &[_]zzz.HTTP.Layer{ home_route.layer(), ws_route.layer(), js_route };
-            
-            const router = try rt.allocator.create(zzz.Router);
-            router.* = try zzz.Router.init(rt.allocator, layers, .{ .not_found = on_request });
 
-            const provisions = try rt.allocator.create(zzz.tardy.Pool(zzz.Provision));
-            provisions.* = try zzz.tardy.Pool(zzz.Provision).init(rt.allocator, 1024, .static);
-            const byte_count = provisions.items.len * @sizeOf(zzz.Provision);
-            @memset(@as([*]u8, @ptrCast(provisions.items.ptr))[0..byte_count], 0);
-            
-            const connection_count = try rt.allocator.create(usize);
-            connection_count.* = 0;
-            const accept_queued = try rt.allocator.create(bool);
-            accept_queued.* = false;
-            
-            try rt.spawn(
-              .{ rt, server_config, router, zzz.secsock.SecureSocket.unsecured(s.*), provisions, connection_count, accept_queued },
-              zzz.Server.main_frame,
-              server_config.stack_size
-            );
-            
-            //try rt.spawn(.{rt}, cleanup_task, 64 * 1024);
+    try tardy.entry(
+      Entry_Params{ .server = &server, .router = &router, .socket = socket },
+      struct {
+        fn entry(rt: *zzz.tardy.Runtime, p: Entry_Params) !void {
+          try p.server.serve(rt, p.router, .{ .normal = p.socket });
         }
     }.entry);
 }
