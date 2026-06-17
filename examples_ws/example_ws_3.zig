@@ -141,43 +141,29 @@ pub fn main() !void{
     //var tardy = try TardyType.init(allocator, .{ .threading = .single });
     defer tardy.deinit();
     
-    try tardy.entry(&socket, struct {
-        fn entry(rt: *zzz.tardy.Runtime, s: *const Socket) !void {
-            const config = zzz.ServerConfig{
-                .stack_size = STACK_SIZE, // stack for http requests
-            };
-            
-            const home_route = zzz.HTTP.Route.init("/").get({}, on_request);
-            const ws_route = zzz.HTTP.Route.init("/ws").get({}, on_ws_endpoint);
-            const layers = &[_]zzz.HTTP.Layer{
-              home_route.layer(),
-              ws_route.layer(),
-            };
-            
-            const router = try rt.allocator.create(zzz.Router);
-            router.* = try zzz.Router.init(rt.allocator, layers, .{
-              .not_found = on_request,
-            });
-            // no defer router - lifetime per server work
-            
-            const provisions = try rt.allocator.create(zzz.tardy.Pool(zzz.Provision)); // use heap instead of stack
-            provisions.* = try zzz.tardy.Pool(zzz.Provision).init(rt.allocator, 1024, .static);
-            
-            const byte_count = provisions.items.len * @sizeOf(zzz.Provision); // set zeros -- initialized = false
-            @memset(@as([*]u8, @ptrCast(provisions.items.ptr))[0..byte_count], 0);
-            
-            const connection_count = try rt.allocator.create(usize); // use heap instead stack
-            connection_count.* = 0;
-            
-            const accept_queued = try rt.allocator.create(bool);
-            accept_queued.* = false;
-            
-            try rt.spawn(
-              .{ rt, config, router, zzz.secsock.SecureSocket.unsecured(s.*), provisions, connection_count, accept_queued },
-              zzz.Server.main_frame,
-              config.stack_size
-            );
-        
+    const home_route = zzz.HTTP.Route.init("/").get({}, on_request);
+    const ws_route = zzz.HTTP.Route.init("/ws").get({}, on_ws_endpoint);
+    const layers = &[_]zzz.HTTP.Layer{
+      home_route.layer(),
+      ws_route.layer(),
+    };
+    
+    const router = try zzz.Router.init(allocator, layers, .{ .not_found = on_request });
+    // no defer router - lifetime per server work
+    
+    var server = zzz.Server.init(.{ .stack_size = STACK_SIZE }); // stack for http requests
+    
+    const Entry_Params = struct {
+      server: *zzz.Server,
+      router: *const zzz.Router,
+      socket: Socket,
+    };
+    
+    try tardy.entry(
+      Entry_Params{ .server = &server, .router = &router, .socket = socket },
+      struct {
+        fn entry(rt: *zzz.tardy.Runtime, p: Entry_Params) !void {
+          try p.server.serve(rt, p.router, .{ .normal = p.socket });
         } // end fn entry
     }.entry);
 }
