@@ -2,8 +2,8 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    //const optimize = b.standardOptimizeOption(.{}); // -O Debug
-    const optimize = std.builtin.OptimizeMode.ReleaseFast; // -O ReleaseFast
+    const optimize = b.standardOptimizeOption(.{}); // -O Debug
+    //const optimize = std.builtin.OptimizeMode.ReleaseFast; // -O ReleaseFast
     
     const zzz = b.addModule("zzz", .{
         .root_source_file = b.path("src/lib.zig"),

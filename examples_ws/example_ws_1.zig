@@ -160,7 +160,7 @@ fn on_ws_endpoint(ctx: *const zzz.Context, _: void) !zzz.HTTP.Respond {
 pub fn main() !void{
     //@compileLog("STACK_SIZE = ", STACK_SIZE);
     var gpa = std.heap.GeneralPurposeAllocator(.{
-     .thread_safe = true,
+     //.thread_safe = true,
      .stack_trace_frames = 8, 
     }){};
     const allocator = gpa.allocator();
@@ -175,7 +175,9 @@ pub fn main() !void{
     try socket.bind();
     try socket.listen(1024); // max conn count that are waiting in accept queue
     
-    var tardy = try zzz.tardy.Tardy(.auto).init(allocator, .{});
+    var tardy = try zzz.tardy.Tardy(.auto).init(allocator, .{
+      .threading = .single, // for debug
+    });
     defer tardy.deinit();
     
     const home_route = zzz.HTTP.Route.init("/").get({}, on_request);
@@ -188,19 +190,41 @@ pub fn main() !void{
     const router = try zzz.Router.init(allocator, layers, .{ .not_found = on_request });
     // no defer router - lifetime per server work // defer router.deinit(allocator);
     
+    var server = zzz.Server.init(.{ .stack_size = STACK_SIZE });
+    
     const Entry_Params = struct {
-      config: zzz.ServerConfig,
+      server: *zzz.Server,
+      //config: zzz.ServerConfig,
       router: *const zzz.Router,
       socket: Socket,
     };
     
     try tardy.entry(
-      Entry_Params{ .config = .{ .stack_size = STACK_SIZE }, .router = &router, .socket = socket },
+      Entry_Params{ .server = &server, .router = &router, .socket = socket },
+      //Entry_Params{ .config = .{ .stack_size = STACK_SIZE }, .router = &router, .socket = socket },
       struct {
         fn entry(rt: *zzz.tardy.Runtime, p: Entry_Params) !void {
-          var server = zzz.Server.init(p.config);
-          try server.serve(rt, p.router, .{ .normal = p.socket });
+          //var server = zzz.Server.init(p.config);
+          //try server.serve(rt, p.router, .{ .normal = p.socket });
+          try p.server.serve(rt, p.router, .{ .normal = p.socket });
+          
+          //try rt.spawn(.{rt, &server}, struct {
+          try rt.spawn(.{rt, p.server}, struct {
+            fn shutdown_timer(runtime: *zzz.tardy.Runtime, server1: *zzz.Server) !void {
+              try zzz.tardy.Timer.delay(runtime, .{ .seconds = 30 });
+              std.log.info("AUTO-SHUTDOWN FOR LEAK CHECK...", .{});
+              runtime.stop();
+              
+              _ = server1;
+              //server1.deinit();
+              //std.posix.exit(0);
+            }
+          }.shutdown_timer, 16 * 1024);
+          
         } // end fn entry
     }.entry);
+    
+    server.deinit();
+    std.log.info("Done. GPA report now.", .{});
 }
 

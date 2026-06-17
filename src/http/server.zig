@@ -150,14 +150,49 @@ pub const Provision = struct {
 pub const Server = struct {
     const Self = @This();
     config: ServerConfig,
+    
+    provision_pool: ?*Pool(Provision) = null,
+    connection_count: ?*usize = null,
+    accept_queued: ?*bool = null,
+    allocator: ?std.mem.Allocator = null,
 
     pub fn init(config: ServerConfig) Self {
         return Self{ .config = config };
     }
 
-    pub fn deinit(self: *const Self) void {
-        if (self.tls_ctx) |tls| {
-            tls.deinit();
+    //pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: *Self) void {
+        //if (self.tls_ctx) |tls| {
+        //    tls.deinit();
+        //}
+        const alloc = self.allocator orelse return;
+        
+        if (self.provision_pool) |pool| {
+            for (pool.items) |*provision| {
+                if (provision.initalized) {
+                    provision.zc_recv_buffer.deinit();
+                    provision.header_buffer.deinit();
+                    provision.request.deinit();
+                    provision.response.deinit();
+                    provision.queries.deinit();
+                    provision.storage.deinit();
+                    provision.arena.deinit();
+                    alloc.free(provision.captures);
+                    provision.initalized = false;
+                }
+            }
+            pool.deinit();
+            alloc.destroy(pool);
+            self.provision_pool = null;
+        }
+        
+        if (self.connection_count) |ptr| {
+          alloc.destroy(ptr);
+          self.connection_count = null;
+        }
+        if (self.accept_queued) |ptr| {
+          alloc.destroy(ptr);
+          self.accept_queued = null;
         }
     }
 
@@ -237,33 +272,37 @@ pub const Server = struct {
         const index = try provisions.borrow();
         defer provisions.release(index);
         const provision = provisions.get_ptr(index);
+        log.debug("DEBUG CONN START: Slot={d} ActiveTasks={d}", .{index, rt.scheduler.runnable});
         
         defer {
-          log.debug("DEBUG: Releasing slot {d} and resetting arena", .{index});
+          log.debug("DEBUG CONN END: Slot={d} Releasing resources", .{index});
+          //log.debug("DEBUG: Releasing slot {d} and resetting arena", .{index});
           provision.request.clear();
           provision.response.clear();
           provision.storage.clear();
-          _ = provision.arena.reset(.retain_capacity);
+          //_ = provision.arena.reset(.retain_capacity);
+          _ = provision.arena.reset(.free_all);
         }
 
         // if we are growing, we can handle a newly allocated provision here.
         // otherwise, it should be initalized.
-        if (!provision.initalized) {
-            log.debug("initalizing new provision", .{});
-            provision.zc_recv_buffer = ZeroCopy(u8).init(rt.allocator, config.socket_buffer_bytes) catch {
-                @panic("attempting to allocate more memory than available. (ZeroCopyBuffer)");
-            };
-            provision.header_buffer = std.ArrayList(u8).init(rt.allocator);
-            provision.arena = std.heap.ArenaAllocator.init(rt.allocator);
-            provision.captures = rt.allocator.alloc(Capture, config.capture_count_max) catch {
-                @panic("attempting to allocate more memory than available. (Captures)");
-            };
-            provision.queries = AnyCaseStringMap.init(rt.allocator);
-            provision.storage = TypedStorage.init(rt.allocator);
-            provision.request = Request.init(rt.allocator);
-            provision.response = Response.init(rt.allocator);
-            provision.initalized = true;
-        }
+        //if (!provision.initalized) {
+            //log.debug("initalizing new provision", .{});
+            //provision.zc_recv_buffer = ZeroCopy(u8).init(rt.allocator, config.socket_buffer_bytes) catch {
+            //    @panic("attempting to allocate more memory than available. (ZeroCopyBuffer)");
+            //};
+            //provision.header_buffer = std.ArrayList(u8).init(rt.allocator);
+            //provision.arena = std.heap.ArenaAllocator.init(rt.allocator);
+            //provision.captures = rt.allocator.alloc(Capture, config.capture_count_max) catch {
+            //    @panic("attempting to allocate more memory than available. (Captures)");
+            //};
+            //provision.queries = AnyCaseStringMap.init(rt.allocator);
+            //provision.storage = TypedStorage.init(rt.allocator);
+            //provision.request = Request.init(rt.allocator);
+            //provision.response = Response.init(rt.allocator);
+            ////provision.initalized = true; // what if here we got double init? first time in serve
+        //}
+        assert(provision.initalized);
         defer prepare_new_request(null, provision, config) catch unreachable;
 
         var state: State = .{ .request = .header };
@@ -541,20 +580,27 @@ pub const Server = struct {
         const count = self.config.connection_count_max orelse 1024;
         const pooling: PoolKind = if (self.config.connection_count_max == null) .grow else .static;
 
-        const provision_pool = try rt.allocator.create(Pool(Provision));
-        provision_pool.* = try Pool(Provision).init(rt.allocator, count, pooling);
-        errdefer rt.allocator.destroy(provision_pool);
+        //const provision_pool = try rt.allocator.create(Pool(Provision));
+        //provision_pool.* = try Pool(Provision).init(rt.allocator, count, pooling);
+        //errdefer rt.allocator.destroy(provision_pool);
+        self.provision_pool = try rt.allocator.create(Pool(Provision));
+        self.provision_pool.?.* = try Pool(Provision).init(rt.allocator, count, pooling);
 
-        const connection_count = try rt.allocator.create(usize);
-        errdefer rt.allocator.destroy(connection_count);
-        connection_count.* = 0;
+        //const connection_count = try rt.allocator.create(usize);
+        //errdefer rt.allocator.destroy(connection_count);
+        //connection_count.* = 0;
+        self.connection_count = try rt.allocator.create(usize);
+        self.connection_count.?.* = 0;
 
-        const accept_queued = try rt.allocator.create(bool);
-        errdefer rt.allocator.destroy(accept_queued);
-        accept_queued.* = true;
+        //const accept_queued = try rt.allocator.create(bool);
+        //errdefer rt.allocator.destroy(accept_queued);
+        //accept_queued.* = true;
+        self.accept_queued = try rt.allocator.create(bool);
+        self.accept_queued.?.* = true;
 
         // initialize first batch of provisions :)
-        for (provision_pool.items) |*provision| {
+        //for (provision_pool.items) |*provision| {
+        for (self.provision_pool.?.items) |*provision| {
             provision.initalized = true;
             provision.zc_recv_buffer = ZeroCopy(u8).init(
                 rt.allocator,
@@ -579,9 +625,12 @@ pub const Server = struct {
                 self.config,
                 router,
                 secure,
-                provision_pool,
-                connection_count,
-                accept_queued,
+                //provision_pool,
+                self.provision_pool.?,
+                //connection_count,
+                self.connection_count.?,
+                //accept_queued,
+                self.accept_queued.?,
             },
             main_frame,
             self.config.stack_size,
