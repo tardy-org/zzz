@@ -82,11 +82,13 @@ fn on_upgrade(req: *const zzz.Request, proto: []const u8) !bool {
     const key = req.headers.get("Sec-WebSocket-Key") orelse return false;
     const ext = req.headers.get("Sec-WebSocket-Extensions");
     
-    var header_buf = std.ArrayList(u8).init(std.heap.page_allocator);
+    //var header_buf = std.ArrayList(u8).init(std.heap.page_allocator);
+    var header_buf = std.ArrayList(u8).init(req.runtime.allocator);
     defer header_buf.deinit();
     
     //const res = try websocket.upgrade(req.socket, req.runtime, std.heap.page_allocator, key, ext, header_buf.writer() );
-    const res = try websocket.upgrade(req.socket, req.runtime, req.runtime.allocator, key, ext, header_buf.writer() );
+    //const res = try websocket.upgrade(req.socket, req.runtime, req.runtime.allocator, key, ext, header_buf.writer() );
+    const res = try websocket.upgrade(req.socket, req.runtime, key, ext, header_buf.writer() );
     
     _ = try req.socket.send_all(req.runtime, header_buf.items);
     
@@ -98,8 +100,8 @@ fn on_upgrade(req: *const zzz.Request, proto: []const u8) !bool {
     };
     
     if (ws_handler.on_connect) |f| try f(res.conn);
-    try req.runtime.spawn(.{ res.conn, ws_handler, std.heap.page_allocator }, websocket.runLoop, STACK_SIZE);
-    //try req.runtime.spawn(.{ res.conn, ws_handler, req.runtime.allocator }, websocket.runLoop, STACK_SIZE);
+    //try req.runtime.spawn(.{ res.conn, ws_handler, std.heap.page_allocator }, websocket.runLoop, STACK_SIZE);
+    try req.runtime.spawn(.{ res.conn, ws_handler, req.runtime.allocator }, websocket.runLoop, STACK_SIZE);
     return true;
 }
 
@@ -123,7 +125,8 @@ fn on_ws_endpoint(ctx: *const zzz.Context, _: void) !zzz.HTTP.Respond {
   var header_buf = std.ArrayList(u8).init(ctx.allocator);
   defer header_buf.deinit();
   
-  const res = try websocket.upgrade(&ctx.socket, ctx.runtime, ctx.allocator, key, ext, header_buf.writer());
+  //const res = try websocket.upgrade(&ctx.socket, ctx.runtime, ctx.allocator, key, ext, header_buf.writer());
+  const res = try websocket.upgrade(&ctx.socket, ctx.runtime, key, ext, header_buf.writer());
   
   _ = try ctx.socket.send_all(ctx.runtime, header_buf.items);
   
@@ -138,8 +141,8 @@ fn on_ws_endpoint(ctx: *const zzz.Context, _: void) !zzz.HTTP.Respond {
   
   std.log.info("Starting WebSocket Loop...", .{});
   
-  //websocket.runLoop(res.conn, ws_handler, ctx.runtime.allocator) catch |err| { // sync loop
-  websocket.runLoop(res.conn, ws_handler, std.heap.page_allocator) catch |err| { // sync loop
+  websocket.runLoop(res.conn, ws_handler, ctx.runtime.allocator) catch |err| { // sync loop
+  //websocket.runLoop(res.conn, ws_handler, std.heap.page_allocator) catch |err| { // sync loop
     std.log.err("WebSocket RunLoop Error: {s}", .{@errorName(err)});
     
     if (err == error.Closed) {
@@ -156,9 +159,16 @@ fn on_ws_endpoint(ctx: *const zzz.Context, _: void) !zzz.HTTP.Respond {
 
 pub fn main() !void{
     //@compileLog("STACK_SIZE = ", STACK_SIZE);
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{
+     .thread_safe = true,
+     .stack_trace_frames = 8, 
+    }){};
     const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
+    //defer _ = gpa.deinit();
+    defer {
+      const status = gpa.deinit();
+      if (status == .leak){ std.debug.print("MEMORY LEAK DETECTED!", .{}); }else{ std.debug.print("no mem leak.\n", .{}); }
+    }
     
     const socket = try Socket.init(.{ .tcp = .{ .host = HOST, .port = PORT } });
     defer socket.close_blocking();

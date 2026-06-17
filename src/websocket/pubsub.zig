@@ -235,11 +235,14 @@ pub fn handle_upgrade(ctx: *const zzz.Context, user_handler: UserWsHandler, stac
     var header_buf = std.ArrayList(u8).init(ctx.allocator);
     defer header_buf.deinit();
     
-    const res = try zzz.websocket.upgrade(&ctx.socket, ctx.runtime, ctx.allocator, key, ext, header_buf.writer());
+    //const res = try zzz.websocket.upgrade(&ctx.socket, ctx.runtime, ctx.allocator, key, ext, header_buf.writer());
+    const res = try zzz.websocket.upgrade(&ctx.socket, ctx.runtime, key, ext, header_buf.writer());
     _ = try ctx.socket.send_all(ctx.runtime, header_buf.items);
     
-    const session = try std.heap.page_allocator.create(WsSession);
-    session.* = WsSession.init(std.heap.page_allocator, res.conn, user_handler);
+    //const session = try std.heap.page_allocator.create(WsSession);
+    //session.* = WsSession.init(std.heap.page_allocator, res.conn, user_handler);
+    const session = try ctx.runtime.allocator.create(WsSession);
+    session.* = WsSession.init(ctx.runtime.allocator, res.conn, user_handler);
     
     session.conn.socket = &session.socket_owned; // use heap instead stack
     session.conn.user_data = session; // for not use global maps that locks
@@ -291,15 +294,16 @@ pub fn handle_upgrade(ctx: *const zzz.Context, user_handler: UserWsHandler, stac
             }
             
             session.deinit();
-            std.heap.page_allocator.destroy(session);
+            //std.heap.page_allocator.destroy(session);
+            ctx.runtime.allocator.destroy(session);
             
             std.log.info("WebSocket Loop finished and memory freed", .{});
             return .close;
         };
     }
     
-    //zzz.websocket.runLoop(session.conn, internal_handler, ctx.runtime.allocator) catch |err| { // sync loop
-    zzz.websocket.runLoop(session.conn, internal_handler, std.heap.page_allocator) catch |err| { // sync loop
+    zzz.websocket.runLoop(session.conn, internal_handler, ctx.runtime.allocator) catch |err| { // sync loop
+    //zzz.websocket.runLoop(session.conn, internal_handler, std.heap.page_allocator) catch |err| { // sync loop
       if (err != error.Closed){
         std.log.err("WebSocket RunLoop Error: {s}", .{ @errorName(err) });
       }
@@ -321,7 +325,8 @@ pub fn handle_upgrade(ctx: *const zzz.Context, user_handler: UserWsHandler, stac
     }
     
     session.deinit();
-    std.heap.page_allocator.destroy(session);
+    //std.heap.page_allocator.destroy(session);
+    ctx.runtime.allocator.destroy(session);
     
     std.log.info("WebSocket Loop finished and memory freed", .{});
     return .close;

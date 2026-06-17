@@ -297,7 +297,8 @@ pub const RoutingTrie = struct {
             .route = current.route orelse return null,
             .captures = captures[0..capture_idx],
             .queries = queries,
-            .duped = try duped.toOwnedSlice(allocator),
+            //.duped = try duped.toOwnedSlice(allocator),
+            .duped = if (duped.items.len > 0) try duped.toOwnedSlice(allocator) else &.{},
         };
     }
 };

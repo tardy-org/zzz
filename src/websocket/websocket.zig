@@ -103,7 +103,7 @@ pub const HandshakeResult = struct {
 pub fn upgrade(
     socket: *const SecureSocket,
     runtime: *Runtime,
-    allocator: Allocator,
+    //allocator: Allocator,
     sec_websocket_key: []const u8,
     sec_websocket_extensions: ?[]const u8,
     response_writer: anytype,
@@ -120,12 +120,12 @@ pub fn upgrade(
     //    }
     //}
     
-    const accept = try computeAccept(allocator, sec_websocket_key);
+    const accept = computeAccept(sec_websocket_key);
     try response_writer.writeAll("HTTP/1.1 101 Switching Protocols\r\n");
     try response_writer.writeAll("Upgrade: websocket\r\n");
     try response_writer.writeAll("Connection: Upgrade\r\n");
     try response_writer.writeAll("Sec-WebSocket-Accept: ");
-    try response_writer.writeAll(accept);
+    try response_writer.writeAll(&accept);
     try response_writer.writeAll("\r\n");
     //if (compression) {
     //    try response_writer.writeAll("Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\r\n");
@@ -423,16 +423,18 @@ pub fn runLoop(conn: Conn, handler: Handler, allocator: Allocator) !void {
 
 // helpers
 
-fn computeAccept(allocator: Allocator, key: []const u8) ![]const u8 {
+fn computeAccept(key: []const u8) [28]u8 {
     const magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     var hasher = std.crypto.hash.Sha1.init(.{});
     hasher.update(key);
     hasher.update(magic);
+    
     var hash: [20]u8 = undefined;
     hasher.final(&hash);
-    var buf: [28]u8 = undefined;
-    const encoded = std.base64.standard.Encoder.encode(&buf, &hash);
-    return try allocator.dupe(u8, encoded);
+    
+    var out_buf: [28]u8 = undefined;
+    _ = std.base64.standard.Encoder.encode(&out_buf, &hash);
+    return out_buf;
 }
 
 const OpCode = enum(u8) {

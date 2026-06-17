@@ -237,6 +237,14 @@ pub const Server = struct {
         const index = try provisions.borrow();
         defer provisions.release(index);
         const provision = provisions.get_ptr(index);
+        
+        defer {
+          log.debug("DEBUG: Releasing slot {d} and resetting arena", .{index});
+          provision.request.clear();
+          provision.response.clear();
+          provision.storage.clear();
+          _ = provision.arena.reset(.retain_capacity);
+        }
 
         // if we are growing, we can handle a newly allocated provision here.
         // otherwise, it should be initalized.
@@ -368,7 +376,9 @@ pub const Server = struct {
                   if (request.headers.get("Upgrade")) |upgrade| {
                     if (std.mem.eql(u8, upgrade, "websocket")) {
                       if (try on_upgrade(request, upgrade)) {
-                        continue :http_loop;
+                        log.debug("DEBUG: Upgrade successful for slot {d}, exiting main_frame", .{index});
+                        //continue :http_loop;
+                        return;
                       }
                     }
                     
@@ -376,14 +386,19 @@ pub const Server = struct {
                 }
                 
                 const found = try router.get_bundle_from_host( // continue as common HTTP if not WebSocket upgrade
-                    rt.allocator,
+                    //rt.allocator,
+                    provision.arena.allocator(),
                     //provision.request.uri.?,
                     request.uri.?,
                     provision.captures,
                     &provision.queries,
                 );
-                defer rt.allocator.free(found.duped);
-                defer for (found.duped) |dupe| rt.allocator.free(dupe);
+                //defer rt.allocator.free(found.duped);
+                //defer for (found.duped) |dupe| rt.allocator.free(dupe);
+                //defer if(found.duped.len > 0){
+                //  for (found.duped) |item| rt.allocator.free(item);
+                //  rt.allocator.free(found.duped);
+                //};
                 
                 
                 const h_with_data: HandlerWithData = found.route.get_handler(

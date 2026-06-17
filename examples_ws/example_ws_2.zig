@@ -130,7 +130,8 @@ fn on_ws_endpoint(ctx: *const zzz.Context, _: void) !zzz.HTTP.Respond {
   var header_buf = std.ArrayList(u8).init(ctx.allocator);
   defer header_buf.deinit();
   
-  const res = try websocket.upgrade(&ctx.socket, ctx.runtime, ctx.allocator, key, ext, header_buf.writer());
+  //const res = try websocket.upgrade(&ctx.socket, ctx.runtime, ctx.allocator, key, ext, header_buf.writer());
+  const res = try websocket.upgrade(&ctx.socket, ctx.runtime, key, ext, header_buf.writer());
   
   _ = try ctx.socket.send_all(ctx.runtime, header_buf.items);
   
@@ -152,7 +153,6 @@ fn on_ws_endpoint(ctx: *const zzz.Context, _: void) !zzz.HTTP.Respond {
     if (err == error.Closed) {
       std.log.info("Socket closed by browser", .{});
     }
-  
   };
   
   std.log.info("WebSocket Loop finished", .{});
@@ -171,67 +171,44 @@ pub fn main() !void{
     try socket.bind();
     try socket.listen(1024); // max conn count that are waiting in accept queue
     
+    const home_route = zzz.HTTP.Route.init("/").get({}, on_request);
+    const ws_route = zzz.HTTP.Route.init("/ws").get({}, on_ws_endpoint);
+    const layers = &[_]zzz.HTTP.Layer{
+      home_route.layer(),
+      ws_route.layer(),
+    };
+    
+    const router = try zzz.Router.init(allocator, layers, .{ .not_found = on_request });
+    // no defer router - lifetime per server work
+    
+    var bearssl = zzz.secsock.BearSSL.init(allocator);
+    defer bearssl.deinit();
+    
     const cert = try std.fs.cwd().readFileAlloc(allocator, FULLCHAIN_CERT, 1024 * 10);
     defer allocator.free(cert);
     const key = try std.fs.cwd().readFileAlloc(allocator, PRIVKEY_CERT, 1024 * 10);
     defer allocator.free(key);
     
-    const ctx = ServerContext{
-      .socket = socket,
-      .cert_pem = cert,
-      .key_pem = key,
-    };
+    try bearssl.add_cert_chain("CERTIFICATE", cert, "PRIVATE KEY", key);
+    const secure_socket = try bearssl.to_secure_socket(socket, .server);
+    defer secure_socket.deinit();
     
     const TardyType = zzz.tardy.Tardy(.auto);
     var tardy = try TardyType.init(allocator, .{});
-    //var tardy = try TardyType.init(allocator, .{ .threading = .single });
     defer tardy.deinit();
     
-    try tardy.entry(&ctx, struct {
-        fn entry(rt: *zzz.tardy.Runtime, s_ctx: *const ServerContext) !void {
-            const bearssl = try rt.allocator.create(zzz.secsock.BearSSL);
-            bearssl.* = zzz.secsock.BearSSL.init(rt.allocator);
-            //defer bearssl.deinit();
-            
-            try bearssl.add_cert_chain("CERTIFICATE", s_ctx.cert_pem, "PRIVATE KEY", s_ctx.key_pem);
-            const secure_socket = try bearssl.to_secure_socket(s_ctx.socket, .server);
-            //defer secure_socket.deinit();
-            
-            const config = zzz.ServerConfig{
-                .stack_size = STACK_SIZE,
-            };
-            
-            const home_route = zzz.HTTP.Route.init("/").get({}, on_request);
-            const ws_route = zzz.HTTP.Route.init("/ws").get({}, on_ws_endpoint);
-            const layers = &[_]zzz.HTTP.Layer{
-              home_route.layer(),
-              ws_route.layer(),
-            };
-            
-            const router = try rt.allocator.create(zzz.Router);
-            router.* = try zzz.Router.init(rt.allocator, layers, .{
-              .not_found = on_request,
-            });
-            // no defer router - lifetime per server work
-            
-            const provisions = try rt.allocator.create(zzz.tardy.Pool(zzz.Provision)); // use heap instead of stack
-            provisions.* = try zzz.tardy.Pool(zzz.Provision).init(rt.allocator, 1024, .static); // 1024 = pool size
-            
-            const byte_count = provisions.items.len * @sizeOf(zzz.Provision); // set zeros -- initialized = false
-            @memset(@as([*]u8, @ptrCast(provisions.items.ptr))[0..byte_count], 0);
-            
-            const connection_count = try rt.allocator.create(usize); // use heap instead stack
-            connection_count.* = 0;
-            
-            const accept_queued = try rt.allocator.create(bool);
-            accept_queued.* = false;
-            
-            try rt.spawn(
-              .{ rt, config, router, secure_socket, provisions, connection_count, accept_queued },
-              zzz.Server.main_frame,
-              config.stack_size
-            );
-        
+    const Entry_Params = struct {
+      config: zzz.ServerConfig,
+      router: *const zzz.Router,
+      socket: zzz.secsock.SecureSocket,
+    };
+    
+    try tardy.entry(
+      Entry_Params{ .config = .{ .stack_size = STACK_SIZE }, .router = &router, .socket = secure_socket },
+      struct {
+        fn entry(rt: *zzz.tardy.Runtime, p: Entry_Params) !void {
+          var server = zzz.Server.init(p.config);
+          try server.serve(rt, p.router, .{ .secure = p.socket });
         } // end fn entry
     }.entry);
 }
