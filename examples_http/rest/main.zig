@@ -120,18 +120,23 @@ pub fn main() !void {
     http.Route.init("/").get({}, on_request).post({}, on_request).layer(),
   }, .{ .not_found = on_request });
   
+  var server = zzz.Server.init(.{ .stack_size = STACK_SIZE }); // stack for http requests
+  
   const Entry_Params = struct {
-    config: zzz.ServerConfig,
+    //config: zzz.ServerConfig,
+    server: *zzz.Server,
     router: *const http.Router,
     socket: Socket,
   };
   
   try tardy.entry(
-    Entry_Params{ .config = .{ .stack_size = STACK_SIZE }, .router = &router, .socket = socket },
+    //Entry_Params{ .config = .{ .stack_size = STACK_SIZE }, .router = &router, .socket = socket },
+    Entry_Params{ .server = &server, .router = &router, .socket = socket },
     struct {
       fn entry(rt: *zzz.tardy.Runtime, p: Entry_Params) !void {
-        var server = zzz.Server.init(p.config);
-        try server.serve(rt, p.router, .{ .normal = p.socket });
+        //var server = zzz.Server.init(p.config);
+        //try server.serve(rt, p.router, .{ .normal = p.socket });
+        try p.server.serve(rt, p.router, .{ .normal = p.socket });
       } // end fn entry
     }.entry);
 }
