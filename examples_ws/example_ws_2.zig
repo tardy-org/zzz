@@ -197,18 +197,23 @@ pub fn main() !void{
     var tardy = try TardyType.init(allocator, .{});
     defer tardy.deinit();
     
+    var server = zzz.Server.init(.{ .stack_size = STACK_SIZE });
+    
     const Entry_Params = struct {
-      config: zzz.ServerConfig,
+      //config: zzz.ServerConfig,
+      server: *zzz.Server,
       router: *const zzz.Router,
       socket: zzz.secsock.SecureSocket,
     };
     
     try tardy.entry(
-      Entry_Params{ .config = .{ .stack_size = STACK_SIZE }, .router = &router, .socket = secure_socket },
+      //Entry_Params{ .config = .{ .stack_size = STACK_SIZE }, .router = &router, .socket = secure_socket },
+      Entry_Params{ .server = &server, .router = &router, .socket = secure_socket },
       struct {
         fn entry(rt: *zzz.tardy.Runtime, p: Entry_Params) !void {
-          var server = zzz.Server.init(p.config);
-          try server.serve(rt, p.router, .{ .secure = p.socket });
+          //var server = zzz.Server.init(p.config);
+          //try server.serve(rt, p.router, .{ .secure = p.socket });
+          try p.server.serve(rt, p.router, .{ .secure = p.socket });
         } // end fn entry
     }.entry);
 }
