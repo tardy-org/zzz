@@ -554,11 +554,11 @@ pub const Server = struct {
         log.info("connection ({}) closed", .{secure.socket.addr});
 
         if (!accept_queued.*) {
-            try rt.spawn(
-                .{ rt, config, router, server_socket, provisions, connection_count, accept_queued },
-                main_frame,
-                config.stack_size,
-            );
+        //    try rt.spawn(
+        //        .{ rt, config, router, server_socket, provisions, connection_count, accept_queued },
+        //        main_frame,
+        //        config.stack_size,
+        //    );
             accept_queued.* = true;
         }
     }
