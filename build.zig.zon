@@ -1,16 +1,16 @@
 .{
     .name = .zzz,
     .fingerprint = 0xc3273dca261a7ae0,
-    .version = "0.3.2",
-    .minimum_zig_version = "0.16.0",
+    .version = "0.3.2-dev",
+    .minimum_zig_version = "0.17.0-dev.956+2dca73595",
     .dependencies = .{
         .tardy = .{
-            .url = "https://github.com/tardy-org/tardy/archive/refs/tags/v0.3.2.tar.gz",
-            .hash = "tardy-0.3.2-69wrgkTEBQCi4u4sNr63s5V2TzHXw3iLkkiGXVMGhupi",
+            .url = "git+https://github.com/tardy-org/tardy?ref=main#0a109ae8dbd250dcf5623cb9d3c78304f1875de0",
+            .hash = "tardy-0.3.3-dev-69wrgiHHBQD5FfZ4AKY3N08fdkSOWxvNDdnafqbKVxNz",
         },
         .secsock = .{
-            .url = "https://github.com/tardy-org/secsock/archive/refs/tags/v0.1.2.tar.gz",
-            .hash = "secsock-0.1.2-p0qurcxIAQBc3niJem-RKYS6YrcuyAY2aELeoBB0aQdy",
+            .url = "git+https://github.com/tardy-org/secsock?ref=main#373e922536065d38e6386187dd7b7453f5c7637f",
+            .hash = "secsock-0.1.2-dev-p0qurZhLAQDVTRXz-ccgrLYWh8JzAtFqaeKG64MANuIf",
         },
     },
     .paths = .{
