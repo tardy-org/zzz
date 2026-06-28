@@ -1,15 +1,20 @@
 # zzz
 ![zzz logo](./docs/img/zzz.png)
 
+[![Discord](https://img.shields.io/discord/1294761432922980392?logo=discord)](https://discord.gg/HNEszT7qSR)
 
 ## Installing
-Compatible Zig Version: `0.16.0`
+For in development zzz which uses [tardy/main](https://github.com/tardy-org/tardy/tree/main/), [secsock/main](https://github.com/tardy-org/secsock/tree/main/)  and Zig `0.17.0-dev.956+2dca73595`
 
-Compatible [tardy](https://github.com/tardy-org/tardy) Version is `v0.3.2` and [secsock](https://github.com/tardy-org/secsock) `v0.1.2`
-
-Latest Release: `0.3.2`
+```elvish
+zig fetch --save 'git+https://github.com/tardy-org/zzz?ref=main#commit_hash'
 ```
-zig fetch --save git+https://github.com/tardy-org/zzz#v0.3.2
+
+**Else**
+
+Latest Release: `v0.3.2` which uses [tardy](https://github.com/tardy-org/tardy) `v0.3.2`, [secsock](https://github.com/tardy-org/secsock) `v0.1.2` and Zig `0.16.0`
+```elvish
+zig fetch --save 'git+https://github.com/tardy-org/zzz#v0.3.2'
 ```
 
 You can then add the dependency in your `build.zig` file:
