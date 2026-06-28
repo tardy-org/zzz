@@ -14,7 +14,7 @@ const MimeOption = union(enum) {
 fn generate_mime_helper(any: anytype) MimeOption {
     assert(@typeInfo(@TypeOf(any)) == .pointer);
     const ptr_info = @typeInfo(@TypeOf(any)).pointer;
-    assert(ptr_info.is_const);
+    assert(ptr_info.attrs.@"const");
 
     switch (ptr_info.size) {
         else => unreachable,
@@ -23,18 +23,18 @@ fn generate_mime_helper(any: anytype) MimeOption {
                 else => unreachable,
                 .array => |arr_info| {
                     assert(arr_info.child == u8);
-                    return MimeOption{ .single = any };
+                    return .{ .single = any };
                 },
                 .@"struct" => |struct_info| {
-                    for (struct_info.fields) |field| {
-                        assert(@typeInfo(field.type) == .pointer);
-                        const p_info = @typeInfo(field.type).pointer;
+                    for (struct_info.field_types) |field_type| {
+                        assert(@typeInfo(field_type) == .pointer);
+                        const p_info = @typeInfo(field_type).pointer;
                         assert(@typeInfo(p_info.child) == .array);
                         const a_info = @typeInfo(p_info.child).array;
                         assert(a_info.child == u8);
                     }
 
-                    return MimeOption{ .multiple = any };
+                    return .{ .multiple = any };
                 },
             }
         },
@@ -127,12 +127,12 @@ pub const Mime = struct {
 };
 
 const all_mime_types = blk: {
-    const decls = @typeInfo(Mime).@"struct".decls;
-    var mimes: [decls.len]Mime = undefined;
+    const decls_names = @typeInfo(Mime).@"struct".decl_names;
+    var mimes: [decls_names.len]Mime = undefined;
     var index: usize = 0;
-    for (decls) |decl| {
-        if (@TypeOf(@field(Mime, decl.name)) == Mime) {
-            mimes[index] = @field(Mime, decl.name);
+    for (decls_names) |decl| {
+        if (@TypeOf(@field(Mime, decl)) == Mime) {
+            mimes[index] = @field(Mime, decl);
             index += 1;
         }
     }

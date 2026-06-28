@@ -40,12 +40,12 @@ pub const Pseudoslice = struct {
 
                 if (self.first.ptr == self.shared.ptr) {
                     // just copy over the second.
-                    std.mem.copyForwards(u8, self.shared[self.first.len..], self.second[0..second_len]);
+                    @memcpy(self.shared[self.first.len..][0..second_len], self.second[0..second_len]);
                     return self.shared[start..clamped_end];
                 } else {
                     // copy both over.
-                    std.mem.copyForwards(u8, self.shared[0..first_len], self.first[start..]);
-                    std.mem.copyForwards(u8, self.shared[first_len..], self.second[0..second_len]);
+                    @memcpy(self.shared[0..first_len], self.first[start..]);
+                    @memcpy(self.shared[first_len..][0..second_len], self.second[0..second_len]);
                     return self.shared[0..total_len];
                 }
             }
@@ -85,7 +85,7 @@ test "Pseudoslice First and Shared Same" {
     defer testing.allocator.free(buffer);
 
     const value = "hello, my name is muki";
-    std.mem.copyForwards(u8, buffer, value[0..6]);
+    @memcpy(buffer[0..6], value[0..6]);
 
     var pseudo: Pseudoslice = .init(buffer[0..6], value[6..], buffer);
 

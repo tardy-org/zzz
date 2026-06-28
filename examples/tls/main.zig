@@ -56,13 +56,17 @@ pub fn main(init: std.process.Init) !void {
     defer router.deinit(init.gpa);
 
     // create socket for tardy
-    var socket: Socket = try .init(init.io, .{ .tcp = .{ .host = host, .port = port } });
+    var socket: Socket = try .init(init.io, .{
+        .tcp = .{ .host = host, .port = port },
+    });
     defer socket.close_blocking();
+
     try socket.bind();
     try socket.listen(1024);
 
     var bearssl: secsock.BearSSL = .init(init.gpa);
     defer bearssl.deinit();
+
     try bearssl.add_cert_chain(
         "CERTIFICATE",
         @embedFile("certs/cert.pem"),

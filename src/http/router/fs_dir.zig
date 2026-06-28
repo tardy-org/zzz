@@ -27,7 +27,7 @@ pub const FsDir = struct {
 
         // Resolving the requested file.
         const search_path = ctx.captures[0].remaining;
-        const file_path_z = try ctx.allocator.dupeZ(u8, search_path);
+        const file_path_z = try ctx.allocator.dupeSentinel(u8, search_path, 0x0);
 
         // TODO: check that the path is valid.
 

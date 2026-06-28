@@ -51,15 +51,24 @@ fn parse_struct(allocator: std.mem.Allocator, comptime T: type, map: *const AnyC
     var ret: T = undefined;
     assert(@typeInfo(T) == .@"struct");
     const struct_info = @typeInfo(T).@"struct";
-    inline for (struct_info.fields) |field| {
-        const entry = map.getEntry(field.name);
+    inline for (
+        struct_info.field_types,
+        struct_info.field_names,
+        struct_info.field_attrs,
+    ) |field_type, field_name, field_attrs| {
+        const entry = map.getEntry(field_name);
 
         if (entry) |e| {
-            @field(ret, field.name) = try parse_from(allocator, field.type, field.name, e.value_ptr.*);
-        } else if (field.defaultValue()) |default| {
-            @field(ret, field.name) = default;
-        } else if (@typeInfo(field.type) == .optional) {
-            @field(ret, field.name) = null;
+            @field(ret, field_name) = try parse_from(
+                allocator,
+                field_type,
+                field_name,
+                e.value_ptr.*,
+            );
+        } else if (field_attrs.defaultValue(field_type)) |default| {
+            @field(ret, field_name) = default;
+        } else if (@typeInfo(field_type) == .optional) {
+            @field(ret, field_name) = null;
         } else return error.FieldEmpty;
     }
 

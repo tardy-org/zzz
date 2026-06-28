@@ -32,9 +32,8 @@ pub fn build(b: *std.Build) void {
     add_example(b, "sse", false, target, optimize, zzz);
     add_example(b, "tls", true, target, optimize, zzz);
 
-    if (target.result.os.tag != .windows) {
+    if (target.result.os.tag != .windows)
         add_example(b, "unix", false, target, optimize, zzz);
-    }
 
     const tests = b.addTest(.{
         .name = "tests",

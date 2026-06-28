@@ -41,8 +41,11 @@ pub fn main(init: std.process.Init) !void {
     }, .{});
 
     // create socket for tardy
-    var socket: Socket = try .init(init.io, .{ .tcp = .{ .host = host, .port = port } });
+    var socket: Socket = try .init(init.io, .{
+        .tcp = .{ .host = host, .port = port },
+    });
     defer socket.close_blocking();
+
     try socket.bind();
     try socket.listen(256);
 
