@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const zzz = b.addModule("zzz", .{
-        .root_source_file = b.path("src/lib.zig"),
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) void {
     const tests = b.addTest(.{
         .name = "tests",
         .root_module = b.addModule("tests", .{
-            .root_source_file = b.path("./src/tests.zig"),
+            .root_source_file = b.path("src/tests.zig"),
             .target = target,
             .optimize = optimize,
         }),
@@ -62,7 +62,7 @@ fn add_example(
     zzz_module: *std.Build.Module,
 ) void {
     const mod = b.createModule(.{
-        .root_source_file = b.path(b.fmt("./examples/{s}/main.zig", .{name})),
+        .root_source_file = b.path(b.fmt("examples/{s}/main.zig", .{name})),
         .optimize = optimize,
         .target = target,
         .strip = false,
