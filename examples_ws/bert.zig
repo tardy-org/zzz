@@ -683,16 +683,16 @@ fn writeValue(buf: *std.ArrayList(u8), value: Bert_Value) !void{
     },
     
     .binary => |b|{
-      //if(isPrintableAscii(b)){ // as text when ascii, otherwise bytes
+      if(std.unicode.utf8ValidateSlice(b)){ // as text when ascii/utf8, otherwise bytes
         try writer.print("<<\"{s}\">>", .{b});
-      //}else{
-      //  try writer.print("<<", .{});
-      //  for(b, 0..) |byte, i|{
-      //    if(i != 0){ try writer.print(",", .{}); }
-      //    try writer.print("{}", .{byte});
-      //  }
-      //  try writer.print(">>", .{});
-      //}
+      }else{
+        try writer.print("<<", .{});
+        for(b, 0..) |byte, i|{
+          if(i != 0){ try writer.print(",", .{}); }
+          try writer.print("{}", .{byte});
+        }
+        try writer.print(">>", .{});
+      }
     },
     
     .tuple => |elems|{
