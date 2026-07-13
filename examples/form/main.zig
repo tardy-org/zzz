@@ -4,7 +4,7 @@ const zzz = @import("zzz");
 const http = zzz.HTTP;
 const tardy = zzz.tardy;
 const Runtime = tardy.Runtime;
-const Socket = tardy.Socket;
+const Socket = tardy.net.Socket;
 const Server = http.Server;
 const Router = http.Router;
 const Context = http.Context;
@@ -104,7 +104,7 @@ pub fn main(init: std.process.Init) !void {
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
                 var server: Server = .init(.{
-                    .stack_size = 1024 * 1024 * 4,
+                    .stack_size = .@"4MiB",
                     .socket_buffer_bytes = 1024 * 2,
                 });
                 try server.serve(rt, p.router, .{ .normal = p.socket });

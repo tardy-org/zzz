@@ -1,15 +1,11 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const Dir = @import("tardy").Dir;
-const Runtime = @import("tardy").Runtime;
-const Stat = @import("tardy").Stat;
-const Stream = @import("tardy").Stream;
-const ZeroCopy = @import("tardy").ZeroCopy;
+const tardy = @import("tardy");
+const Dir = tardy.fs.Dir;
 
 const Context = @import("../context.zig").Context;
 const Mime = @import("../mime.zig").Mime;
-const Request = @import("../request.zig").Request;
 const Respond = @import("../response.zig").Respond;
 const Layer = @import("middleware.zig").Layer;
 const Route = @import("route.zig").Route;
@@ -20,7 +16,7 @@ pub const FsDir = struct {
     fn fs_dir_handler(ctx: *const Context, dir: Dir) !Respond {
         if (ctx.captures.len == 0) return ctx.response.apply(.{
             .status = .@"Not Found",
-            .mime = Mime.HTML,
+            .mime = .HTML,
         });
 
         const response = ctx.response;

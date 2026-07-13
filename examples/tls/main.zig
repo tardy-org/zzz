@@ -4,7 +4,7 @@ const zzz = @import("zzz");
 const http = zzz.HTTP;
 const tardy = zzz.tardy;
 const Runtime = tardy.Runtime;
-const Socket = tardy.Socket;
+const Socket = tardy.net.Socket;
 const Server = http.Server;
 const Context = http.Context;
 const Route = http.Route;
@@ -84,7 +84,7 @@ pub fn main(init: std.process.Init) !void {
         EntryParams{ .router = &router, .socket = secure },
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
-                var server: Server = .init(.{ .stack_size = 1024 * 1024 * 8 });
+                var server: Server = .init(.{ .stack_size = .max });
                 try server.serve(rt, p.router, .{ .secure = p.socket });
             }
         }.entry,
