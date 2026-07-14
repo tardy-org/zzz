@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const zzz = @import("zzz");
-const http = zzz.HTTP;
+const http = zzz.http;
 const tardy = zzz.tardy;
 const Runtime = tardy.Runtime;
 const Socket = tardy.net.Socket;
