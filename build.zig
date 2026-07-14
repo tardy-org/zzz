@@ -24,16 +24,39 @@ pub fn build(b: *std.Build) void {
 
     zzz.addImport("secsock", secsock);
 
-    add_example(b, "basic", false, target, optimize, zzz);
-    add_example(b, "cookies", false, target, optimize, zzz);
-    add_example(b, "form", false, target, optimize, zzz);
-    add_example(b, "fs", false, target, optimize, zzz);
-    add_example(b, "middleware", false, target, optimize, zzz);
-    add_example(b, "sse", false, target, optimize, zzz);
-    add_example(b, "tls", true, target, optimize, zzz);
+    for ([_][]const u8{
+        "basic",
+        "cookies",
+        "form",
+        "fs",
+        "middleware",
+        "sse",
+    }) |name| add_example(
+        b,
+        name,
+        false,
+        target,
+        optimize,
+        zzz,
+    );
 
-    if (target.result.os.tag != .windows)
-        add_example(b, "unix", false, target, optimize, zzz);
+    add_example(
+        b,
+        "tls",
+        true,
+        target,
+        optimize,
+        zzz,
+    );
+
+    if (target.result.os.tag != .windows) add_example(
+        b,
+        "unix",
+        false,
+        target,
+        optimize,
+        zzz,
+    );
 
     const tests = b.addTest(.{
         .name = "tests",
@@ -80,13 +103,19 @@ fn add_example(
     const install_artifact = b.addInstallArtifact(example, .{});
     b.getInstallStep().dependOn(&install_artifact.step);
 
-    const build_step = b.step(b.fmt("{s}", .{name}), b.fmt("Build zzz example ({s})", .{name}));
+    const build_step = b.step(
+        b.fmt("{s}", .{name}),
+        b.fmt("Build zzz example ({s})", .{name}),
+    );
     build_step.dependOn(&install_artifact.step);
 
     const run_artifact = b.addRunArtifact(example);
     run_artifact.step.dependOn(&install_artifact.step);
 
-    const run_step = b.step(b.fmt("run_{s}", .{name}), b.fmt("Run zzz example ({s})", .{name}));
+    const run_step = b.step(
+        b.fmt("run_{s}", .{name}),
+        b.fmt("Run zzz example ({s})", .{name}),
+    );
     run_step.dependOn(&install_artifact.step);
     run_step.dependOn(&run_artifact.step);
 }
