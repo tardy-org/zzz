@@ -1,11 +1,9 @@
 pub const TypedStorage = @This();
 
 arena: std.heap.ArenaAllocator,
-storage: hash_map.Custom(
+storage: hash_map.AutoHashMapUnmanaged(
     Key,
     *anyopaque,
-    hash_map.AutoContext(Key),
-    hash_map.default_max_load_percentage,
 ),
 
 pub fn init(allocator: mem.Allocator) TypedStorage {
@@ -31,14 +29,14 @@ pub fn put(self: *TypedStorage, comptime T: type, value: T) !void {
     const allocator = self.arena.allocator();
     const ptr = try allocator.create(T);
     ptr.* = value;
-    const type_id = comptime std.hash.Wyhash.hash(0, @typeName(T));
+    const type_id = comptime hash.Wyhash.hash(0, @typeName(T));
     try self.storage.put(allocator, type_id, @ptrCast(ptr));
 }
 
 /// Extracts a value out of the Storage.
 /// It uses the given type as the K.
 pub fn get(self: *TypedStorage, comptime T: type) ?T {
-    const type_id = comptime std.hash.Wyhash.hash(0, @typeName(T));
+    const type_id = comptime hash.Wyhash.hash(0, @typeName(T));
     const ptr = self.storage.get(type_id) orelse return null;
     return @as(*T, @ptrCast(@alignCast(ptr))).*;
 }
@@ -78,5 +76,6 @@ const Key = u64;
 
 const std = @import("std");
 const testing = std.testing;
+const hash = std.hash;
 const mem = std.mem;
 const hash_map = std.hash_map;

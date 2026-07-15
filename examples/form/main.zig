@@ -8,9 +8,10 @@ const Socket = tardy.net.Socket;
 const Server = http.Server;
 const Router = http.Router;
 const Context = http.Context;
-const Route = http.Route;
-const Form = http.Form;
-const Query = http.Query;
+const Route = Router.Route;
+const form = http.form;
+const Form = form.Form;
+const Query = form.Query;
 const Respond = http.Respond;
 
 const log = std.log.scoped(.@"examples/form");
@@ -35,7 +36,7 @@ fn base_handler(ctx: *const Context, _: void) !Respond {
 
     return ctx.response.apply(.{
         .status = .OK,
-        .mime = http.Mime.HTML,
+        .mime = .HTML,
         .body = body,
     });
 }
@@ -71,7 +72,7 @@ fn generate_handler(ctx: *const Context, _: void) !Respond {
 
     return ctx.response.apply(.{
         .status = .OK,
-        .mime = http.Mime.TEXT,
+        .mime = .TEXT,
         .body = body,
     });
 }
@@ -85,11 +86,16 @@ pub fn main(init: std.process.Init) !void {
 
     var router: Router = try .init(init.gpa, &.{
         Route.init("/").get({}, base_handler).layer(),
-        Route.init("/generate").get({}, generate_handler).post({}, generate_handler).layer(),
+        Route.init("/generate").get({}, generate_handler).post(
+            {},
+            generate_handler,
+        ).layer(),
     }, .{});
     defer router.deinit(init.gpa);
 
-    var socket: Socket = try .init(init.io, .{ .tcp = .{ .host = host, .port = port } });
+    var socket: Socket = try .init(init.io, .{
+        .tcp = .{ .host = host, .port = port },
+    });
     defer socket.close_blocking();
     try socket.bind();
     try socket.listen(4096);
@@ -98,9 +104,10 @@ pub fn main(init: std.process.Init) !void {
         router: *const Router,
         socket: Socket,
     };
+    const params: EntryParams = .{ .router = &router, .socket = socket };
 
     try t.entry(
-        EntryParams{ .router = &router, .socket = socket },
+        params,
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
                 var server: Server = .init(.{

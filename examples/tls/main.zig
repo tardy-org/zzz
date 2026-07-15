@@ -7,12 +7,12 @@ const Runtime = tardy.Runtime;
 const Socket = tardy.net.Socket;
 const Server = http.Server;
 const Context = http.Context;
-const Route = http.Route;
+const Route = Router.Route;
 const Router = http.Router;
 const Respond = http.Respond;
 const secsock = zzz.secsock;
 const SecureSocket = secsock.SecureSocket;
-const Compression = http.Middlewares.Compression;
+const Compression = http.middleware.Compression;
 
 const log = std.log.scoped(.@"examples/tls");
 
@@ -79,9 +79,10 @@ pub fn main(init: std.process.Init) !void {
         router: *const Router,
         socket: SecureSocket,
     };
+    const params: EntryParams = .{ .router = &router, .socket = secure };
 
     try t.entry(
-        EntryParams{ .router = &router, .socket = secure },
+        params,
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
                 var server: Server = .init(.{ .stack_size = .max });

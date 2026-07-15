@@ -1,28 +1,35 @@
 pub const Context = @import("http/Context.zig");
-pub const Cookie = @import("http/cookie.zig").Cookie;
-pub const Date = @import("http/date.zig").Date;
-pub const Encoding = @import("http/encoding.zig").Encoding;
-pub const Form = @import("http/form.zig").Form;
+pub const Cookie = @import("http/Cookie.zig");
+pub const Date = @import("http/Date.zig");
+pub const form = @import("http/form.zig");
 pub const Method = @import("http/method.zig").Method;
-pub const Middlewares = @import("http/middlewares/lib.zig");
-pub const Mime = @import("http/mime.zig").Mime;
-pub const Query = @import("http/form.zig").Query;
-pub const Request = @import("http/request.zig").Request;
-pub const Respond = @import("http/response.zig").Respond;
-pub const Response = @import("http/response.zig").Response;
-pub const Router = @import("http/router.zig").Router;
-pub const FsDir = @import("http/router/fs_dir.zig").FsDir;
-pub const Layer = @import("http/router/middleware.zig").Layer;
-pub const Middleware = @import("http/router/middleware.zig").Middleware;
-pub const MiddlewareFn = @import("http/router/middleware.zig").MiddlewareFn;
-pub const Next = @import("http/router/middleware.zig").Next;
-pub const Route = @import("http/router/route.zig").Route;
-pub const Server = @import("http/server.zig").Server;
-pub const ServerConfig = @import("http/server.zig").ServerConfig;
-pub const SSE = @import("http/sse.zig").SSE;
+pub const middleware = @import("http/middleware.zig");
+pub const Mime = @import("http/Mime.zig");
+pub const Request = @import("http/Request.zig");
+pub const Response = @import("http/Response.zig");
+pub const Router = @import("http/Router.zig");
+pub const Server = @import("http/Server.zig");
+pub const SSE = @import("http/SSE.zig");
 pub const Status = @import("http/status.zig").Status;
 
-pub const HTTPError = error{
+pub const Respond = enum {
+    // When we are returning a real HTTP request, we use this.
+    standard,
+    // If we responded and we want to give control back to the HTTP engine.
+    responded,
+    // If we want the connection to close.
+    close,
+};
+
+pub const Encoding = enum {
+    gzip,
+    compress,
+    deflate,
+    br,
+    zstd,
+};
+
+pub const Error = error{
     TooManyHeaders,
     ContentTooLarge,
     MalformedRequest,

@@ -9,10 +9,10 @@ const Dir = tardy.fs.Dir;
 const Server = http.Server;
 const Router = http.Router;
 const Context = http.Context;
-const Route = http.Route;
+const Route = Router.Route;
 const Respond = http.Respond;
-const FsDir = http.FsDir;
-const Compression = http.Middlewares.Compression;
+const FsDir = Router.FsDir;
+const Compression = http.middleware.Compression;
 
 const log = std.log.scoped(.@"examples/fs");
 
@@ -56,11 +56,6 @@ pub fn main(init: std.process.Init) !void {
     }, .{});
     defer router.deinit(init.gpa);
 
-    const EntryParams = struct {
-        router: *const Router,
-        socket: Socket,
-    };
-
     var socket: Socket = try .init(
         init.io,
         .{ .tcp = .{ .host = host, .port = port } },
@@ -69,8 +64,14 @@ pub fn main(init: std.process.Init) !void {
     try socket.bind();
     try socket.listen(256);
 
+    const EntryParams = struct {
+        router: *const Router,
+        socket: Socket,
+    };
+    const params: EntryParams = .{ .router = &router, .socket = socket };
+
     try t.entry(
-        EntryParams{ .router = &router, .socket = socket },
+        params,
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
                 var server: Server = .init(.{

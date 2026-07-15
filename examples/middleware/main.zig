@@ -8,10 +8,10 @@ const Socket = tardy.net.Socket;
 const Server = http.Server;
 const Router = http.Router;
 const Context = http.Context;
-const Route = http.Route;
-const Next = http.Next;
+const Route = Router.Route;
 const Respond = http.Respond;
-const Middleware = http.Middleware;
+const Middleware = Router.Middleware;
+const Next = Middleware.Next;
 
 const log = std.log.scoped(.@"examples/middleware");
 
@@ -59,10 +59,6 @@ pub fn main(init: std.process.Init) !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
-
     var t: Tardy = try .init(init.gpa, init.io, .{ .threading = .single });
     defer t.deinit();
 
@@ -75,20 +71,24 @@ pub fn main(init: std.process.Init) !void {
         Route.init("/").post(num, root_handler).layer(),
         Route.init("/fail").get(num, root_handler).layer(),
     }, .{});
-    defer router.deinit(allocator);
+    defer router.deinit(init.gpa);
+
+    var socket: Socket = try .init(init.io, .{
+        .tcp = .{ .host = host, .port = port },
+    });
+    defer socket.close_blocking();
+
+    try socket.bind();
+    try socket.listen(256);
 
     const EntryParams = struct {
         router: *const Router,
         socket: Socket,
     };
-
-    var socket: Socket = try .init(init.io, .{ .tcp = .{ .host = host, .port = port } });
-    defer socket.close_blocking();
-    try socket.bind();
-    try socket.listen(256);
+    const params: EntryParams = .{ .router = &router, .socket = socket };
 
     try t.entry(
-        EntryParams{ .router = &router, .socket = socket },
+        params,
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
                 var server: Server = .init(.{});

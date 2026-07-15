@@ -6,14 +6,14 @@ allocator: std.mem.Allocator,
 header_writer: *Io.Writer,
 runtime: *Runtime,
 /// The Request that triggered this handler.
-request: *const Request,
-response: *Response,
+request: *const http.Request,
+response: *http.Response,
 /// Storage
 storage: *core.TypedStorage,
 /// Socket for this Connection.
-socket: SecureSocket,
+socket: secsock.SecureSocket,
 /// Slice of the URL Slug Captures
-captures: []const Capture,
+captures: []const Trie.Capture,
 /// Map of the KV Query pairs in the URL
 queries: *const string_map.AnyCase,
 
@@ -23,8 +23,7 @@ const Io = std.Io;
 const zzz = @import("../root.zig");
 const core = zzz.core;
 const string_map = core.string_map;
+const http = zzz.http;
 const Runtime = zzz.tardy.Runtime;
-const SecureSocket = zzz.secsock.SecureSocket;
-const Request = @import("request.zig").Request;
-const Response = @import("response.zig").Response;
-const Capture = @import("router/routing_trie.zig").Capture;
+const secsock = zzz.secsock;
+const Trie = @import("router/Trie.zig");

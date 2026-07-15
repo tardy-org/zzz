@@ -8,7 +8,7 @@ const Socket = tardy.net.Socket;
 const Server = http.Server;
 const Router = http.Router;
 const Context = http.Context;
-const Route = http.Route;
+const Route = Router.Route;
 const Middleware = http.Middleware;
 const Respond = http.Respond;
 const Cookie = http.Cookie;
@@ -54,9 +54,10 @@ pub fn main(init: std.process.Init) !void {
         router: *const Router,
         socket: Socket,
     };
+    const params: EntryParams = .{ .router = &router, .socket = socket };
 
     try t.entry(
-        EntryParams{ .router = &router, .socket = socket },
+        params,
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
                 var server: Server = .init(.{
