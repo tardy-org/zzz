@@ -31,19 +31,10 @@ pub fn build(b: *std.Build) void {
         "fs",
         "middleware",
         "sse",
+        "tls",
     }) |name| add_example(
         b,
         name,
-        false,
-        target,
-        optimize,
-        zzz,
-    );
-
-    add_example(
-        b,
-        "tls",
-        true,
         target,
         optimize,
         zzz,
@@ -52,7 +43,6 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag != .windows) add_example(
         b,
         "unix",
-        false,
         target,
         optimize,
         zzz,
@@ -79,7 +69,6 @@ pub fn build(b: *std.Build) void {
 fn add_example(
     b: *std.Build,
     name: []const u8,
-    link_libc: bool,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     zzz_module: *std.Build.Module,
@@ -89,15 +78,12 @@ fn add_example(
         .optimize = optimize,
         .target = target,
         .strip = false,
-        .link_libc = link_libc,
     });
     mod.addImport("zzz", zzz_module);
 
     const example = b.addExecutable(.{
         .name = name,
         .root_module = mod,
-        // without llvm leads to error: undefined symbol: tardy_swap_frame
-        .use_llvm = true,
     });
 
     const install_artifact = b.addInstallArtifact(example, .{});
