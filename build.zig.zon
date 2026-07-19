@@ -2,7 +2,7 @@
     .name = .zzz,
     .fingerprint = 0xc3273dca261a7ae0,
     .version = "0.3.2-dev",
-    .minimum_zig_version = "0.17.0-dev.956+2dca73595",
+    .minimum_zig_version = "0.17.0-dev.1413+addc3c3b8",
     .dependencies = .{
         .tardy = .{
             .url = "git+https://github.com/tardy-org/tardy?ref=main#c03d2a4444ee39b78ca7592aa3b370c7198a05a6",

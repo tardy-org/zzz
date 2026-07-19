@@ -56,8 +56,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    tests.root_module.addImport("tardy", tardy);
-    tests.root_module.addImport("secsock", secsock);
 
     const run_test = b.addRunArtifact(tests);
     run_test.step.dependOn(&tests.step);
