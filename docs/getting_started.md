@@ -4,28 +4,28 @@ zzz is a networking framework (HTTP) that allows for modularity and flexibility 
 For this guide, we will assume that you are running on a supported platform.
 This is the current latest release.
 
-`zig fetch --save git+https://github.com/mookums/zzz#v0.3.2`
+`zig fetch --save 'git+https://github.com/tardy-org/zzz#v0.3.2'`
 
 ## Hello, World!
 We can write a quick example that serves out "Hello, World" responses to any client that connects to the server. This example is derived from the one that is provided within the `examples/basic` directory.
 
 ```zig
 const std = @import("std");
-const log = std.log.scoped(.@"examples/basic");
 
 const zzz = @import("zzz");
-const http = zzz.HTTP;
-
+const http = zzz.http;
 const tardy = zzz.tardy;
-const Tardy = tardy.Tardy(.auto);
 const Runtime = tardy.Runtime;
-const Socket = tardy.Socket;
-
+const Socket = tardy.net.Socket;
 const Server = http.Server;
 const Router = http.Router;
 const Context = http.Context;
-const Route = http.Route;
+const Route = Router.Route;
 const Respond = http.Respond;
+
+const log = std.log.scoped(.@"examples/basic");
+
+const Tardy = tardy.Tardy(.auto);
 
 fn base_handler(ctx: *const Context, _: void) !Respond {
     return ctx.response.apply(.{
@@ -35,24 +35,20 @@ fn base_handler(ctx: *const Context, _: void) !Respond {
     });
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var gpa: std.heap.DebugAllocator(.{ .thread_safe = true }) = .init;
-    const allocator = gpa.allocator();
-    defer _ = gpa.deinit();
-
-    var t: Tardy = try .init(allocator, .{ .threading = .auto });
+    var t: Tardy = try .init(init.gpa, init.io, .{ .threading = .auto });
     defer t.deinit();
 
-    var router: Router = try .init(allocator, &.{
+    var router: Router = try .init(init.gpa, &.{
         Route.init("/").get({}, base_handler).layer(),
     }, .{});
-    defer router.deinit(allocator);
+    defer router.deinit(init.gpa);
 
     // create socket for tardy
-    var socket: Socket = try .init(.{
+    var socket: Socket = try .init(init.io, .{
         .tcp = .{ .host = host, .port = port },
     });
     defer socket.close_blocking();
@@ -63,13 +59,14 @@ pub fn main() !void {
         router: *const Router,
         socket: Socket,
     };
+    const params: EntryParams = .{ .router = &router, .socket = socket };
 
     try t.entry(
-        EntryParams{ .router = &router, .socket = socket },
+        params,
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
                 var server: Server = .init(.{
-                    .stack_size = 1024 * 1024 * 4,
+                    .stack_size = .@"4MiB",
                     .socket_buffer_bytes = 1024 * 2,
                     .keepalive_count_max = null,
                     .connection_count_max = 1024,
