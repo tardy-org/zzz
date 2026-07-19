@@ -1,14 +1,14 @@
 const std = @import("std");
 
 const zzz = @import("zzz");
-const http = zzz.HTTP;
+const http = zzz.http;
 const tardy = zzz.tardy;
 const Runtime = tardy.Runtime;
 const Socket = tardy.net.Socket;
 const Server = http.Server;
 const Context = http.Context;
-const Route = http.Route;
 const Router = http.Router;
+const Route = Router.Route;
 const Respond = http.Respond;
 
 const log = std.log.scoped(.@"examples/benchmark");
@@ -34,11 +34,6 @@ pub fn main(init: std.process.Init) !void {
     }, .{});
     defer router.deinit(init.gpa);
 
-    const EntryParams = struct {
-        router: *const Router,
-        socket: Socket,
-    };
-
     var socket: Socket = try .init(init.io, .{ .unix = "/tmp/zzz.sock" });
     defer std.Io.Dir.deleteDirAbsolute(init.io, "/tmp/zzz.sock") catch unreachable;
     defer socket.close_blocking();
@@ -46,8 +41,14 @@ pub fn main(init: std.process.Init) !void {
     try socket.bind();
     try socket.listen(256);
 
+    const EntryParams = struct {
+        router: *const Router,
+        socket: Socket,
+    };
+    const params: EntryParams = .{ .router = &router, .socket = socket };
+
     try t.entry(
-        EntryParams{ .router = &router, .socket = socket },
+        params,
         struct {
             fn entry(rt: *Runtime, p: EntryParams) !void {
                 var server: Server = .init(.{});

@@ -1,19 +1,10 @@
-const std = @import("std");
-
-const Mime = @import("../mime.zig").Mime;
-const Respond = @import("../response.zig").Respond;
-const Response = @import("../response.zig").Response;
-const Middleware = @import("../router/middleware.zig").Middleware;
-const Next = @import("../router/middleware.zig").Next;
-const Layer = @import("../router/middleware.zig").Layer;
-const TypedMiddlewareFn = @import("../router/middleware.zig").TypedMiddlewareFn;
-
+//TODO: add examples utilizing this to prevent bitrot
 /// Rate Limiting Middleware.
 ///
 /// Provides a IP-matching Bucket-based Rate Limiter.
-pub fn RateLimiting(config: *RateLimitConfig) Layer {
-    const func: TypedMiddlewareFn(*RateLimitConfig) = struct {
-        fn rate_limit_mw(next: *Next, c: *RateLimitConfig) !Respond {
+pub fn RateLimiting(config: *Config) Middleware.Layer {
+    const func: Middleware.TypedFn(*Config) = struct {
+        fn rate_limit_mw(next: *Middleware.Next, c: *Config) !http.Respond {
             const ip = get_ip(next.context.socket.inner.addr);
             const time = std.time.milliTimestamp();
 
@@ -21,7 +12,11 @@ pub fn RateLimiting(config: *RateLimitConfig) Layer {
             const entry = try c.map.getOrPut(ip);
 
             if (entry.found_existing) {
-                entry.value_ptr.replenish(time, c.tokens_per_sec, c.max_tokens);
+                entry.value_ptr.replenish(
+                    time,
+                    c.tokens_per_sec,
+                    c.max_tokens,
+                );
                 if (entry.value_ptr.take()) {
                     c.mutex.unlock();
                     return try next.run();
@@ -31,7 +26,10 @@ pub fn RateLimiting(config: *RateLimitConfig) Layer {
                 return c.response_on_limited;
             }
 
-            entry.value_ptr.* = .{ .tokens = c.max_tokens, .last_refill_ms = time };
+            entry.value_ptr.* = .{
+                .tokens = c.max_tokens,
+                .last_refill_ms = time,
+            };
             c.mutex.unlock();
             return try next.run();
         }
@@ -40,19 +38,19 @@ pub fn RateLimiting(config: *RateLimitConfig) Layer {
     return Middleware.init(config, func).layer();
 }
 
-pub const RateLimitConfig = struct {
+pub const Config = struct {
     map: std.AutoHashMap(u128, Bucket),
     tokens_per_sec: u16,
     max_tokens: u16,
-    response_on_limited: Response.Fields,
+    response_on_limited: http.Response.Fields,
     mutex: std.Thread.Mutex = .{},
 
     pub fn init(
-        allocator: std.mem.Allocator,
+        allocator: mem.Allocator,
         tokens_per_sec: u16,
         max_tokens: u16,
-        response_on_limited: ?Respond,
-    ) RateLimitConfig {
+        response_on_limited: ?http.Respond,
+    ) Config {
         const map: std.AutoHashMap(u128, Bucket) = .init(allocator);
         const respond = response_on_limited orelse .{
             .status = .@"Too Many Requests",
@@ -68,7 +66,7 @@ pub const RateLimitConfig = struct {
         };
     }
 
-    pub fn deinit(self: *RateLimitConfig) void {
+    pub fn deinit(self: *Config) void {
         self.map.deinit();
     }
 };
@@ -97,7 +95,15 @@ const Bucket = struct {
 fn get_ip(addr: std.net.Address) u128 {
     return switch (addr.any.family) {
         std.posix.AF.INET => @intCast(addr.in.sa.addr),
-        std.posix.AF.INET6 => std.mem.bytesAsValue(u128, &addr.in6.sa.addr[0]).*,
+        std.posix.AF.INET6 => mem.bytesAsValue(u128, &addr.in6.sa.addr[0]).*,
         else => @panic("Not an IP address."),
     };
 }
+
+const std = @import("std");
+const mem = std.mem;
+
+const zzz = @import("../../root.zig");
+const http = zzz.http;
+const Router = zzz.http.Router;
+const Middleware = Router.Middleware;

@@ -1,8 +1,3 @@
-const std = @import("std");
-const testing = std.testing;
-
-const log = std.log.scoped(.@"zzz/http/method");
-
 pub const Method = enum(u8) {
     GET = 0,
     HEAD = 1,
@@ -14,11 +9,17 @@ pub const Method = enum(u8) {
     TRACE = 7,
     PATCH = 8,
 
+    // TODO: Why do we need this and not a simple switch
     fn encode(method: []const u8) u64 {
         var buffer: [@sizeOf(u64)]u8 = @splat(0);
         @memcpy(buffer[0..method.len], method);
 
-        return std.mem.readPackedInt(u64, buffer[0..], 0, .native);
+        return std.mem.readPackedInt(
+            u64,
+            buffer[0..],
+            0,
+            .native,
+        );
     }
 
     pub fn parse(method: []const u8) !Method {
@@ -30,15 +31,15 @@ pub const Method = enum(u8) {
         const encoded = encode(method);
 
         return switch (encoded) {
-            encode("GET") => Method.GET,
-            encode("HEAD") => Method.HEAD,
-            encode("POST") => Method.POST,
-            encode("PUT") => Method.PUT,
-            encode("DELETE") => Method.DELETE,
-            encode("CONNECT") => Method.CONNECT,
-            encode("OPTIONS") => Method.OPTIONS,
-            encode("TRACE") => Method.TRACE,
-            encode("PATCH") => Method.PATCH,
+            encode("GET") => .GET,
+            encode("HEAD") => .HEAD,
+            encode("POST") => .POST,
+            encode("PUT") => .PUT,
+            encode("DELETE") => .DELETE,
+            encode("CONNECT") => .CONNECT,
+            encode("OPTIONS") => .OPTIONS,
+            encode("TRACE") => .TRACE,
+            encode("PATCH") => .PATCH,
             else => {
                 log.warn("unable to match method: {s} | {d}", .{ method, encoded });
                 return error.CannotParse;
@@ -50,6 +51,11 @@ pub const Method = enum(u8) {
 test "Parsing Strings" {
     for (std.meta.tags(Method)) |method| {
         const method_string = @tagName(method);
-        try testing.expectEqual(method, Method.parse(method_string));
+        try testing.expectEqual(method, try Method.parse(method_string));
     }
 }
+
+const log = std.log.scoped(.@"zzz/http/method");
+
+const std = @import("std");
+const testing = std.testing;

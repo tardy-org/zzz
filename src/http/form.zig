@@ -1,11 +1,37 @@
-const std = @import("std");
-const assert = std.debug.assert;
-const testing = std.testing;
+/// Parses Form data from a request body in `x-www-form-urlencoded` format.
+pub fn Form(comptime T: type) type {
+    return struct {
+        pub fn parse(allocator: mem.Allocator, ctx: *const Context) !T {
+            var m: string_map.AnyCase = .init(ctx.allocator);
+            defer {
+                var it = m.iterator();
+                while (it.next()) |entry| {
+                    allocator.free(entry.key_ptr.*);
+                    allocator.free(entry.value_ptr.*);
+                }
+                m.deinit();
+            }
 
-const AnyCaseStringMap = @import("../core/any_case_string_map.zig").AnyCaseStringMap;
-const Context = @import("context.zig").Context;
+            if (ctx.request.body) |body|
+                try construct_map_from_body(allocator, &m, body)
+            else
+                return error.BodyEmpty;
 
-pub fn decode_alloc(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+            return parse_struct(allocator, T, &m);
+        }
+    };
+}
+
+/// Parses Form data from request URL query parameters.
+pub fn Query(comptime T: type) type {
+    return struct {
+        pub fn parse(allocator: mem.Allocator, ctx: *const Context) !T {
+            return parse_struct(allocator, T, ctx.queries);
+        }
+    };
+}
+
+pub fn decode_alloc(allocator: mem.Allocator, input: []const u8) ![]const u8 {
     var list: std.ArrayList(u8) = try .initCapacity(allocator, input.len);
     defer list.deinit(allocator);
 
@@ -17,7 +43,11 @@ pub fn decode_alloc(allocator: std.mem.Allocator, input: []const u8) ![]const u8
             '%' => {
                 if (input_index + 2 >= input.len) return error.InvalidEncoding;
                 list.appendAssumeCapacity(
-                    try std.fmt.parseInt(u8, input[input_index + 1 .. input_index + 3], 16),
+                    try std.fmt.parseInt(
+                        u8,
+                        input[input_index + 1 .. input_index + 3],
+                        16,
+                    ),
                 );
                 input_index += 2;
             },
@@ -29,25 +59,39 @@ pub fn decode_alloc(allocator: std.mem.Allocator, input: []const u8) ![]const u8
     return list.toOwnedSlice(allocator);
 }
 
-fn parse_from(allocator: std.mem.Allocator, comptime T: type, comptime name: []const u8, value: []const u8) !T {
+fn parse_from(
+    allocator: mem.Allocator,
+    comptime T: type,
+    comptime name: []const u8,
+    value: []const u8,
+) !T {
     return switch (@typeInfo(T)) {
         .int => |info| switch (info.signedness) {
             .unsigned => try std.fmt.parseUnsigned(T, value, 10),
             .signed => try std.fmt.parseInt(T, value, 10),
         },
         .float => try std.fmt.parseFloat(T, value),
-        .optional => |info| @as(T, try parse_from(allocator, info.child, name, value)),
+        .optional => |info| try parse_from(
+            allocator,
+            info.child,
+            name,
+            value,
+        ),
         .@"enum" => std.meta.stringToEnum(T, value) orelse return error.InvalidEnumValue,
-        .bool => std.mem.eql(u8, value, "true"),
+        .bool => mem.eql(u8, value, "true"),
         else => switch (T) {
             []const u8 => try allocator.dupe(u8, value),
-            [:0]const u8 => try allocator.dupeZ(u8, value),
-            else => std.debug.panic("Unsupported field type \"{s}\"", .{@typeName(T)}),
+            [:0]const u8 => try allocator.dupeSentinel(u8, value),
+            else => std.debug.panic("Unsupported field type \"{t}\"", .{T}),
         },
     };
 }
 
-fn parse_struct(allocator: std.mem.Allocator, comptime T: type, map: *const AnyCaseStringMap) !T {
+fn parse_struct(
+    allocator: mem.Allocator,
+    comptime T: type,
+    map: *const string_map.AnyCase,
+) !T {
     var ret: T = undefined;
     assert(@typeInfo(T) == .@"struct");
     const struct_info = @typeInfo(T).@"struct";
@@ -75,22 +119,34 @@ fn parse_struct(allocator: std.mem.Allocator, comptime T: type, map: *const AnyC
     return ret;
 }
 
-fn construct_map_from_body(allocator: std.mem.Allocator, m: *AnyCaseStringMap, body: []const u8) !void {
-    var pairs = std.mem.splitScalar(u8, body, '&');
+fn construct_map_from_body(
+    allocator: mem.Allocator,
+    m: *string_map.AnyCase,
+    body: []const u8,
+) !void {
+    var pairs = mem.splitScalar(u8, body, '&');
 
     while (pairs.next()) |pair| {
-        const field_idx = std.mem.indexOfScalar(u8, pair, '=') orelse return error.MissingSeperator;
+        const field_idx = mem.indexOfScalar(u8, pair, '=') orelse
+            return error.MissingSeperator;
         if (pair.len < field_idx + 2) return error.MissingValue;
 
         const key = pair[0..field_idx];
         const value = pair[(field_idx + 1)..];
 
-        if (std.mem.indexOfScalar(u8, value, '=') != null) return error.MalformedPair;
+        if (mem.indexOfScalar(u8, value, '=') != null)
+            return error.MalformedPair;
 
-        const decoded_key = try decode_alloc(allocator, key);
+        const decoded_key = try decode_alloc(
+            allocator,
+            key,
+        );
         errdefer allocator.free(decoded_key);
 
-        const decoded_value = try decode_alloc(allocator, value);
+        const decoded_value = try decode_alloc(
+            allocator,
+            value,
+        );
         errdefer allocator.free(decoded_value);
 
         // Allow for duplicates (like with the URL params),
@@ -104,45 +160,12 @@ fn construct_map_from_body(allocator: std.mem.Allocator, m: *AnyCaseStringMap, b
     }
 }
 
-/// Parses Form data from a request body in `x-www-form-urlencoded` format.
-pub fn Form(comptime T: type) type {
-    return struct {
-        pub fn parse(allocator: std.mem.Allocator, ctx: *const Context) !T {
-            var m: AnyCaseStringMap = .init(ctx.allocator);
-            defer {
-                var it = m.iterator();
-                while (it.next()) |entry| {
-                    allocator.free(entry.key_ptr.*);
-                    allocator.free(entry.value_ptr.*);
-                }
-                m.deinit();
-            }
-
-            if (ctx.request.body) |body|
-                try construct_map_from_body(allocator, &m, body)
-            else
-                return error.BodyEmpty;
-
-            return parse_struct(allocator, T, &m);
-        }
-    };
-}
-
-/// Parses Form data from request URL query parameters.
-pub fn Query(comptime T: type) type {
-    return struct {
-        pub fn parse(allocator: std.mem.Allocator, ctx: *const Context) !T {
-            return parse_struct(allocator, T, ctx.queries);
-        }
-    };
-}
-
 test "FormData: Parsing from Body" {
     const UserRole = enum { admin, visitor };
     const User = struct { id: u32, name: []const u8, age: u8, role: UserRole };
     const body: []const u8 = "id=10&name=John&age=12&role=visitor";
 
-    var m: AnyCaseStringMap = .init(testing.allocator);
+    var m: string_map.AnyCase = .init(testing.allocator);
     defer {
         var it = m.iterator();
         while (it.next()) |entry| {
@@ -166,7 +189,7 @@ test "FormData: Parsing Missing Fields" {
     const User = struct { id: u32, name: []const u8, age: u8 };
     const body: []const u8 = "id=10";
 
-    var m: AnyCaseStringMap = .init(testing.allocator);
+    var m: string_map.AnyCase = .init(testing.allocator);
     defer {
         var it = m.iterator();
         while (it.next()) |entry| {
@@ -185,7 +208,7 @@ test "FormData: Parsing Missing Fields" {
 test "FormData: Parsing Missing Value" {
     const body: []const u8 = "abc=abc&id=";
 
-    var m: AnyCaseStringMap = .init(testing.allocator);
+    var m: string_map.AnyCase = .init(testing.allocator);
     defer {
         var it = m.iterator();
         while (it.next()) |entry| {
@@ -195,6 +218,22 @@ test "FormData: Parsing Missing Value" {
         m.deinit();
     }
 
-    const result = construct_map_from_body(testing.allocator, &m, body);
-    try testing.expectError(error.MissingValue, result);
+    const result = construct_map_from_body(
+        testing.allocator,
+        &m,
+        body,
+    );
+    try testing.expectError(
+        error.MissingValue,
+        result,
+    );
 }
+
+const std = @import("std");
+const mem = std.mem;
+const assert = std.debug.assert;
+const testing = std.testing;
+
+const zzz = @import("../root.zig");
+const string_map = zzz.core.string_map;
+const Context = @import("Context.zig");

@@ -4,7 +4,7 @@
 [![Discord](https://img.shields.io/discord/1294761432922980392?logo=discord)](https://discord.gg/HNEszT7qSR)
 
 ## Installing
-For in development zzz which uses [tardy/main](https://github.com/tardy-org/tardy/tree/main/), [secsock/main](https://github.com/tardy-org/secsock/tree/main/)  and Zig `0.17.0-dev.956+2dca73595`
+For in development zzz which uses [tardy/main](https://github.com/tardy-org/tardy/tree/main/), [secsock/main](https://github.com/tardy-org/secsock/tree/main/)  and Zig `0.17.0-dev.1413+addc3c3b8`
 
 ```elvish
 zig fetch --save 'git+https://github.com/tardy-org/zzz?ref=main#commit_hash'

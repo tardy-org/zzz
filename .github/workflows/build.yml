@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.0-dev.956+2dca73595
+          version: 0.17.0-dev.1413+addc3c3b8
       - name: Build all examples
         run: zig build
 
@@ -46,6 +46,6 @@ jobs:
       - uses: actions/checkout@v6
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.0-dev.956+2dca73595
+          version: 0.17.0-dev.1413+addc3c3b8
       - name: Build all examples
         run: zig build test --summary all
