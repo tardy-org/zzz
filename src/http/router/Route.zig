@@ -27,7 +27,7 @@ pub fn get_allowed(self: Route, allocator: std.mem.Allocator) ![]const u8 {
 
     var current: []u8 = "";
     inline for (std.meta.tags(http.Method)) |method| {
-        if (self.handlers[@intFromEnum(method)] != null) {
+        if (self.handlers[@backingInt(method)] != null) {
             current = std.fmt.bufPrint(
                 buffer,
                 "{s},{s}",
@@ -46,7 +46,7 @@ pub fn get_allowed(self: Route, allocator: std.mem.Allocator) ![]const u8 {
 /// Get a defined request handler for the provided method.
 /// Return NULL if no handler is defined for this method.
 pub fn get_handler(self: Route, method: http.Method) ?Handler.WithData {
-    return self.handlers[@intFromEnum(method)];
+    return self.handlers[@backingInt(method)];
 }
 
 pub fn layer(self: Route) Middleware.Layer {
@@ -62,7 +62,7 @@ inline fn inner_route(
 ) Route {
     const wrapped = wrapping.wrap(usize, data);
     var new_handlers = self.handlers;
-    new_handlers[comptime @intFromEnum(method)] = .{
+    new_handlers[comptime @backingInt(method)] = .{
         .handler = @ptrCast(handler_fn),
         .middlewares = &.{},
         .data = wrapped,
@@ -186,7 +186,7 @@ pub fn embed_file(
         fn handler_fn(ctx: *const http.Context, _: void) !http.Respond {
             const response = ctx.response;
 
-            const cache_control: []const u8 = if (comptime builtin.mode == .Debug)
+            const cache_control: []const u8 = if (comptime builtin.mode == .debug)
                 "no-cache"
             else
                 comptime std.fmt.comptimePrint(

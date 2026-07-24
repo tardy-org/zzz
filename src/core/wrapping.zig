@@ -43,7 +43,7 @@ pub fn wrap(comptime I: type, value: anytype) I {
     return context: {
         switch (comptime @typeInfo(@TypeOf(value))) {
             .pointer => break :context @intFromPtr(value),
-            .void => break :context @intFromEnum(Wrapped.void),
+            .void => break :context @backingInt(Wrapped.void),
             .int => |info| {
                 const uint = @Int(.unsigned, info.bits);
                 break :context @intCast(@as(uint, @bitCast(value)));
@@ -57,7 +57,9 @@ pub fn wrap(comptime I: type, value: anytype) I {
             .@"struct" => |info| {
                 switch (info.layout) {
                     .@"packed" => {
-                        const uint = @Int(.unsigned, @typeInfo(info.backing_integer.?).int.bits);
+                        const uint = @Int(.unsigned, @typeInfo(
+                            info.backing_integer.?,
+                        ).int.bits);
                         break :context @intCast(@as(uint, @bitCast(value)));
                     },
                     else => {
@@ -67,14 +69,16 @@ pub fn wrap(comptime I: type, value: anytype) I {
                 }
             },
             .bool => break :context if (value)
-                @intFromEnum(Wrapped.true)
+                @backingInt(Wrapped.true)
             else
-                @intFromEnum(Wrapped.false),
+                @backingInt(Wrapped.false),
             .optional => break :context if (value) |v|
                 wrap(I, v)
             else
-                @intFromEnum(Wrapped.null),
-            else => @compileError("wrapping unsupported type: " ++ @typeName(@TypeOf(value))),
+                @backingInt(Wrapped.null),
+            else => @compileError(
+                "wrapping unsupported type: " ++ @typeName(@TypeOf(value)),
+            ),
         }
     };
 }
@@ -101,7 +105,9 @@ pub fn unwrap(comptime T: type, value: anytype) T {
             .@"struct" => |info| {
                 switch (info.layout) {
                     .@"packed" => {
-                        const uint = @Int(.unsigned, @typeInfo(info.backing_integer.?).int.bits);
+                        const uint = @Int(.unsigned, @typeInfo(
+                            info.backing_integer.?,
+                        ).int.bits);
                         break :context @bitCast(@as(uint, @intCast(value)));
                     },
                     else => {
@@ -112,13 +118,12 @@ pub fn unwrap(comptime T: type, value: anytype) T {
                 }
             },
             .bool => {
-                assert(value == @intFromEnum(Wrapped.true) or value == @intFromEnum(Wrapped.false));
-                break :context if (value == @intFromEnum(Wrapped.false)) false else true;
+                assert(value == @backingInt(Wrapped.true) or
+                    value == @backingInt(Wrapped.false));
+                break :context if (value == @backingInt(Wrapped.false)) false else true;
             },
-            .optional => |info| break :context if (value == @intFromEnum(Wrapped.null))
-                null
-            else
-                unwrap(info.child, value),
+            .optional => |info| break :context if (value ==
+                @backingInt(Wrapped.null)) null else unwrap(info.child, value),
             else => unreachable,
         }
     };
@@ -149,11 +154,23 @@ test "wrap/unwrap - floats" {
 }
 
 test "wrap/unwrap - booleans" {
-    try testing.expectEqual(@intFromEnum(Wrapped.true), wrap(usize, true));
-    try testing.expectEqual(@intFromEnum(Wrapped.false), wrap(usize, false));
+    try testing.expectEqual(
+        @backingInt(Wrapped.true),
+        wrap(usize, true),
+    );
+    try testing.expectEqual(
+        @backingInt(Wrapped.false),
+        wrap(usize, false),
+    );
 
-    try testing.expectEqual(true, unwrap(bool, @as(usize, @intFromEnum(Wrapped.true))));
-    try testing.expectEqual(false, unwrap(bool, @as(usize, @intFromEnum(Wrapped.false))));
+    try testing.expectEqual(
+        true,
+        unwrap(bool, @as(usize, @backingInt(Wrapped.true))),
+    );
+    try testing.expectEqual(
+        false,
+        unwrap(bool, @as(usize, @backingInt(Wrapped.false))),
+    );
 }
 
 test "wrap/unwrap - optionals" {
@@ -168,8 +185,14 @@ test "wrap/unwrap - optionals" {
 }
 
 test "wrap/unwrap - void" {
-    try testing.expectEqual(@intFromEnum(Wrapped.void), wrap(usize, {}));
-    try testing.expectEqual({}, unwrap(void, @as(usize, @intFromEnum(Wrapped.void))));
+    try testing.expectEqual(
+        @backingInt(Wrapped.void),
+        wrap(usize, {}),
+    );
+    try testing.expectEqual(
+        {},
+        unwrap(void, @as(usize, @backingInt(Wrapped.void))),
+    );
 }
 
 test "wrap/unwrap - pointers" {
