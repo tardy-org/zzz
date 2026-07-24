@@ -13,11 +13,11 @@ pub fn init(path: []const u8) Route {
 
 /// Returns a comma delinated list of allowed Methods for this route. This
 /// is meant to be used as the value for the 'Allow' header in the Response.
-pub fn get_allowed(self: Route, allocator: std.mem.Allocator) ![]const u8 {
+pub fn get_allowed(route: Route, allocator: mem.Allocator) ![]const u8 {
     // This gets allocated within the context of the connection's arena.
     const allowed_size = comptime blk: {
         var size = 0;
-        for (std.meta.tags(http.Method)) |method| {
+        for (meta.tags(http.Method)) |method| {
             size += @tagName(method).len + 1;
         }
         break :blk size;
@@ -26,12 +26,12 @@ pub fn get_allowed(self: Route, allocator: std.mem.Allocator) ![]const u8 {
     const buffer = try allocator.alloc(u8, allowed_size);
 
     var current: []u8 = "";
-    inline for (std.meta.tags(http.Method)) |method| {
-        if (self.handlers[@backingInt(method)] != null) {
+    inline for (meta.tags(http.Method)) |method| {
+        if (route.handlers[@backingInt(method)] != null) {
             current = std.fmt.bufPrint(
                 buffer,
-                "{s},{s}",
-                .{ @tagName(method), current },
+                "{t},{s}",
+                .{ method, current },
             ) catch unreachable;
         }
     }
@@ -45,144 +45,141 @@ pub fn get_allowed(self: Route, allocator: std.mem.Allocator) ![]const u8 {
 
 /// Get a defined request handler for the provided method.
 /// Return NULL if no handler is defined for this method.
-pub fn get_handler(self: Route, method: http.Method) ?Handler.WithData {
-    return self.handlers[@backingInt(method)];
+pub fn get_handler(route: Route, method: http.Method) ?Handler.WithData {
+    return route.handlers[@backingInt(method)];
 }
 
-pub fn layer(self: Route) Middleware.Layer {
-    return .{ .route = self };
+pub fn layer(route: Route) Middleware.Layer {
+    return .{ .route = route };
 }
 
 /// Set a handler function for the provided method.
 inline fn inner_route(
+    route: Route,
     comptime method: http.Method,
-    self: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
     const wrapped = wrapping.wrap(usize, data);
-    var new_handlers = self.handlers;
+    var new_handlers = route.handlers;
     new_handlers[comptime @backingInt(method)] = .{
-        .handler = @ptrCast(handler_fn),
+        .handler = @ptrCast(
+            handler_fn,
+        ),
         .middlewares = &.{},
         .data = wrapped,
     };
 
     return .{
-        .path = self.path,
+        .path = route.path,
         .handlers = new_handlers,
     };
 }
 
 /// Set a handler function for all methods.
 pub fn all(
-    self: Route,
+    route: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
     const wrapped = wrapping.wrap(usize, data);
-    var new_handlers = self.handlers;
+    var new_handlers = route.handlers;
 
     for (&new_handlers) |*new_handler| {
         new_handler.* = .{
-            .handler = @ptrCast(handler_fn),
+            .handler = @ptrCast(
+                handler_fn,
+            ),
             .middlewares = &.{},
             .data = wrapped,
         };
     }
 
     return .{
-        .path = self.path,
+        .path = route.path,
         .handlers = new_handlers,
     };
 }
 
 pub fn get(
-    self: Route,
+    route: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
-    return inner_route(.GET, self, data, handler_fn);
+    return route.inner_route(.GET, data, handler_fn);
 }
 
 pub fn head(
-    self: Route,
+    route: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
-    return inner_route(.HEAD, self, data, handler_fn);
+    return route.inner_route(.HEAD, data, handler_fn);
 }
 
 pub fn post(
-    self: Route,
+    route: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
-    return inner_route(.POST, self, data, handler_fn);
+    return route.inner_route(.POST, data, handler_fn);
 }
 
 pub fn put(
-    self: Route,
+    route: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
-    return inner_route(.PUT, self, data, handler_fn);
+    return route.inner_route(.PUT, data, handler_fn);
 }
 
 pub fn delete(
-    self: Route,
+    route: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
-    return inner_route(.DELETE, self, data, handler_fn);
+    return route.inner_route(.DELETE, data, handler_fn);
 }
 
 pub fn connect(
-    self: Route,
+    route: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
-    return inner_route(.CONNECT, self, data, handler_fn);
+    return route.inner_route(.CONNECT, data, handler_fn);
 }
 
 pub fn options(
-    self: Route,
+    route: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
-    return inner_route(.OPTIONS, self, data, handler_fn);
+    return route.inner_route(.OPTIONS, data, handler_fn);
 }
 
 pub fn trace(
-    self: Route,
+    route: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
-    return inner_route(.TRACE, self, data, handler_fn);
+    return route.inner_route(.TRACE, data, handler_fn);
 }
 
 pub fn patch(
-    self: Route,
+    route: Route,
     data: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(data)),
 ) Route {
-    return inner_route(.PATCH, self, data, handler_fn);
+    return route.inner_route(.PATCH, data, handler_fn);
 }
-
-const ServeEmbeddedOptions = struct {
-    /// If you are serving a compressed file, please
-    /// set the correct encoding type.
-    encoding: ?http.Encoding = null,
-    mime: ?http.Mime = null,
-};
 
 /// Define a GET handler to serve an embedded file.
 pub fn embed_file(
-    self: *const Route,
-    comptime opts: ServeEmbeddedOptions,
+    route: *const Route,
+    comptime opts: EmbeddedOptions,
     comptime bytes: []const u8,
 ) Route {
-    return self.get({}, struct {
+    return route.get({}, struct {
         fn handler_fn(ctx: *const http.Context, _: void) !http.Respond {
             const response = ctx.response;
 
@@ -207,7 +204,7 @@ pub fn embed_file(
                 try response.headers.put("ETag", etag[0..]);
 
                 if (ctx.request.headers.get("If-None-Match")) |match| {
-                    if (std.mem.eql(u8, etag, match)) {
+                    if (mem.eql(u8, etag, match)) {
                         return response.apply(.{
                             .status = .@"Not Modified",
                             .mime = .HTML,
@@ -217,7 +214,9 @@ pub fn embed_file(
             }
 
             if (opts.encoding) |encoding|
-                try response.headers.put("Content-Encoding", @tagName(encoding));
+                try response.headers.put("Content-Encoding", @tagName(
+                    encoding,
+                ));
 
             return response.apply(.{
                 .status = .OK,
@@ -240,9 +239,18 @@ pub const Handler = struct {
     }
 };
 
+const EmbeddedOptions = struct {
+    /// If you are serving a compressed file, please
+    /// set the correct encoding type.
+    encoding: ?http.Encoding = null,
+    mime: ?http.Mime = null,
+};
+
 const log = std.log.scoped(.@"zzz/http/route");
 
 const std = @import("std");
+const mem = std.mem;
+const meta = std.meta;
 const assert = std.debug.assert;
 const builtin = @import("builtin");
 
