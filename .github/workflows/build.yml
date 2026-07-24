@@ -32,7 +32,7 @@ jobs:
         with:
           version: 0.17.0-dev.1413+addc3c3b8
       - name: Build all examples
-        run: zig build
+        run: zig build all --summary all
 
   run-tests:
     name: Run Tests
