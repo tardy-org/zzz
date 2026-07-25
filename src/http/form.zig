@@ -127,14 +127,14 @@ fn construct_map_from_body(
     var pairs = mem.splitScalar(u8, body, '&');
 
     while (pairs.next()) |pair| {
-        const field_idx = mem.indexOfScalar(u8, pair, '=') orelse
+        const field_idx = mem.findScalar(u8, pair, '=') orelse
             return error.MissingSeperator;
         if (pair.len < field_idx + 2) return error.MissingValue;
 
         const key = pair[0..field_idx];
         const value = pair[(field_idx + 1)..];
 
-        if (mem.indexOfScalar(u8, value, '=') != null)
+        if (mem.findScalar(u8, value, '=') != null)
             return error.MalformedPair;
 
         const decoded_key = try decode_alloc(

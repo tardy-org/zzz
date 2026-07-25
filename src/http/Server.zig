@@ -161,7 +161,7 @@ pub fn main_frame(
                 if (provision.zc_recv_buffer.len > config.request_bytes_max) break;
                 const search_area_start = (provision.zc_recv_buffer.len - recv_count) -| 4;
 
-                if (std.mem.indexOf(
+                if (mem.find(
                     u8,
                     // Minimize the search area.
                     provision.zc_recv_buffer.subslice(.{
@@ -315,7 +315,7 @@ pub fn main_frame(
                 },
                 .responded => {
                     const connection = provision.request.headers.get("Connection") orelse "keep-alive";
-                    if (std.mem.eql(u8, connection, "close")) break :http_loop;
+                    if (mem.eql(u8, connection, "close")) break :http_loop;
                     if (config.keepalive_count_max) |max| {
                         if (keepalive_count > max) {
                             log.debug(
@@ -369,7 +369,7 @@ pub fn main_frame(
             }
 
             const connection = provision.request.headers.get("Connection") orelse "keep-alive";
-            if (std.mem.eql(u8, connection, "close")) break;
+            if (mem.eql(u8, connection, "close")) break;
             if (config.keepalive_count_max) |max| {
                 if (keepalive_count > max) {
                     log.debug(
@@ -615,6 +615,7 @@ pub const TLSFileOptions = union(enum) {
 const log = std.log.scoped(.@"zzz/http/server");
 
 const std = @import("std");
+const mem = std.mem;
 const debug = std.debug;
 const Io = std.Io;
 const builtin = @import("builtin");

@@ -17,7 +17,7 @@ fn fs_dir_handler(ctx: *const http.Context, dir: fs.Dir) !http.Respond {
     );
 
     // TODO: check that the path is valid.
-    const extension_start = mem.lastIndexOfScalar(
+    const extension_start = mem.findScalarLast(
         u8,
         search_path,
         '.',

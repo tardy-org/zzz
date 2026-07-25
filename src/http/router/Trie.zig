@@ -71,7 +71,7 @@ pub fn get_bundle(
     queries: *string_map.AnyCase,
 ) !?Bundle {
     var capture_idx: usize = 0;
-    const query_pos = mem.indexOfScalar(u8, path, '?');
+    const query_pos = mem.findScalar(u8, path, '?');
     var iter = mem.tokenizeScalar(
         u8,
         path[0..(query_pos orelse path.len)],
@@ -114,7 +114,7 @@ pub fn get_bundle(
                             };
                         } else |_| continue :child_loop,
                         // Float types MUST have a '.' to differentiate them.
-                        .float => if (mem.indexOfScalar(
+                        .float => if (mem.findScalar(
                             u8,
                             chunk,
                             '.',
@@ -166,7 +166,7 @@ pub fn get_bundle(
             );
 
             while (query_iter.next()) |chunk| {
-                const field_idx = mem.indexOfScalar(
+                const field_idx = mem.findScalar(
                     u8,
                     chunk,
                     '=',
@@ -176,7 +176,7 @@ pub fn get_bundle(
                 const key = chunk[0..field_idx];
                 const value = chunk[(field_idx + 1)..];
 
-                if (mem.indexOfScalar(u8, value, '=') != null)
+                if (mem.findScalar(u8, value, '=') != null)
                     return error.MalformedPair;
 
                 const decoded_key = try form.decode_alloc(
