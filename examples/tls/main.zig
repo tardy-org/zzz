@@ -1,21 +1,3 @@
-const std = @import("std");
-
-const zzz = @import("zzz");
-const http = zzz.http;
-const tardy = zzz.tardy;
-const Runtime = tardy.Runtime;
-const Socket = tardy.net.Socket;
-const Server = http.Server;
-const Context = http.Context;
-const Route = Router.Route;
-const Router = http.Router;
-const Respond = http.Respond;
-const secsock = zzz.secsock;
-const SecureSocket = secsock.SecureSocket;
-const Compression = http.middleware.Compression;
-
-const log = std.log.scoped(.@"examples/tls");
-
 const Tardy = tardy.Tardy(.auto);
 
 fn root_handler(ctx: *const Context, _: void) !Respond {
@@ -33,7 +15,7 @@ fn root_handler(ctx: *const Context, _: void) !Respond {
 
     return ctx.response.apply(.{
         .status = .OK,
-        .mime = http.Mime.HTML,
+        .mime = .HTML,
         .body = body[0..],
     });
 }
@@ -91,3 +73,21 @@ pub fn main(init: std.process.Init) !void {
         }.entry,
     );
 }
+
+const log = std.log.scoped(.@"examples/tls");
+
+const std = @import("std");
+
+const zzz = @import("zzz");
+const http = zzz.http;
+const tardy = zzz.tardy;
+const Runtime = tardy.Runtime;
+const Socket = tardy.net.Socket;
+const Server = http.Server;
+const Context = http.Context;
+const Router = http.Router;
+const Respond = http.Respond;
+const secsock = zzz.secsock;
+const SecureSocket = secsock.SecureSocket;
+const Compression = http.middleware.Compression;
+const Route = Router.Route;

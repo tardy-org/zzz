@@ -68,7 +68,10 @@ pub fn main(init: std.process.Init) !void {
         router: *const Router,
         socket: Socket,
     };
-    const params: EntryParams = .{ .router = &router, .socket = socket };
+    const params: EntryParams = .{
+        .router = &router,
+        .socket = socket,
+    };
 
     try t.entry(
         params,
