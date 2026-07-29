@@ -45,9 +45,9 @@ pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
 
                 for (route.handlers, 0..) |handler, i| if (handler) |h| {
                     r.handlers[i] = .{
-                        .handler = h.handler,
+                        .handler_fn = h.handler_fn,
                         .middlewares = self.middlewares.items,
-                        .data = h.data,
+                        .args = h.args,
                     };
                 };
             },

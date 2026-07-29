@@ -21,7 +21,7 @@ pub const Respond = enum {
     close,
 };
 
-pub const Encoding = enum {
+pub const Compression = enum {
     gzip,
     compress,
     deflate,

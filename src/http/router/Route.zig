@@ -57,17 +57,17 @@ pub fn layer(route: Route) Middleware.Layer {
 inline fn inner_route(
     route: Route,
     comptime method: http.Method,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    const wrapped = wrapping.wrap(usize, data);
+    const arg: core.Args = .init(args);
     var new_handlers = route.handlers;
     new_handlers[comptime @backingInt(method)] = .{
-        .handler = @ptrCast(
+        .handler_fn = @ptrCast(
             handler_fn,
         ),
         .middlewares = &.{},
-        .data = wrapped,
+        .args = arg,
     };
 
     return .{
@@ -79,19 +79,19 @@ inline fn inner_route(
 /// Set a handler function for all methods.
 pub fn all(
     route: Route,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    const wrapped = wrapping.wrap(usize, data);
+    const arg: core.Args = .init(args);
     var new_handlers = route.handlers;
 
     for (&new_handlers) |*new_handler| {
         new_handler.* = .{
-            .handler = @ptrCast(
+            .handler_fn = @ptrCast(
                 handler_fn,
             ),
             .middlewares = &.{},
-            .data = wrapped,
+            .args = arg,
         };
     }
 
@@ -103,74 +103,74 @@ pub fn all(
 
 pub fn get(
     route: Route,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.GET, data, handler_fn);
+    return route.inner_route(.GET, args, handler_fn);
 }
 
 pub fn head(
     route: Route,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.HEAD, data, handler_fn);
+    return route.inner_route(.HEAD, args, handler_fn);
 }
 
 pub fn post(
     route: Route,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.POST, data, handler_fn);
+    return route.inner_route(.POST, args, handler_fn);
 }
 
 pub fn put(
     route: Route,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.PUT, data, handler_fn);
+    return route.inner_route(.PUT, args, handler_fn);
 }
 
 pub fn delete(
     route: Route,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.DELETE, data, handler_fn);
+    return route.inner_route(.DELETE, args, handler_fn);
 }
 
 pub fn connect(
     route: Route,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.CONNECT, data, handler_fn);
+    return route.inner_route(.CONNECT, args, handler_fn);
 }
 
 pub fn options(
     route: Route,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.OPTIONS, data, handler_fn);
+    return route.inner_route(.OPTIONS, args, handler_fn);
 }
 
 pub fn trace(
     route: Route,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.TRACE, data, handler_fn);
+    return route.inner_route(.TRACE, args, handler_fn);
 }
 
 pub fn patch(
     route: Route,
-    data: anytype,
-    handler_fn: Handler.TypedFn(@TypeOf(data)),
+    args: anytype,
+    handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.PATCH, data, handler_fn);
+    return route.inner_route(.PATCH, args, handler_fn);
 }
 
 /// Define a GET handler to serve an embedded file.
@@ -213,9 +213,9 @@ pub fn embed_file(
                 }
             }
 
-            if (opts.encoding) |encoding|
+            if (opts.compression) |compression|
                 try response.headers.put("Content-Encoding", @tagName(
-                    encoding,
+                    compression,
                 ));
 
             return response.apply(.{
@@ -228,11 +228,15 @@ pub fn embed_file(
 }
 
 pub const Handler = struct {
-    pub const Fn = *const fn (*const http.Context, usize) anyerror!http.Respond;
+    pub const Fn = *const fn (
+        *const http.Context,
+        core.Args,
+    ) anyerror!http.Respond;
+
     pub const WithData = struct {
-        handler: Handler.Fn,
         middlewares: []const Middleware.WithData,
-        data: usize,
+        handler_fn: Handler.Fn,
+        args: core.Args,
     };
     pub fn TypedFn(comptime T: type) type {
         return *const fn (*const http.Context, T) anyerror!http.Respond;
@@ -242,7 +246,7 @@ pub const Handler = struct {
 const EmbeddedOptions = struct {
     /// If you are serving a compressed file, please
     /// set the correct encoding type.
-    encoding: ?http.Encoding = null,
+    compression: ?http.Compression = null,
     mime: ?http.Mime = null,
 };
 
@@ -256,5 +260,5 @@ const builtin = @import("builtin");
 
 const zzz = @import("../../root.zig");
 const http = zzz.http;
-const wrapping = zzz.core.wrapping;
+const core = zzz.core;
 const Middleware = @import("Middleware.zig");
