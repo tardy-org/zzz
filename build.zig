@@ -2,15 +2,12 @@ pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const tardy = b.dependency("tardy", .{
-        .target = target,
-        .optimize = optimize,
-    }).module("tardy");
-
     const secsock = b.dependency("secsock", .{
         .target = target,
         .optimize = optimize,
     }).module("secsock");
+
+    const tardy = secsock.import_table.get("tardy").?;
 
     const zzz = b.addModule("zzz", .{
         .root_source_file = b.path("src/root.zig"),
