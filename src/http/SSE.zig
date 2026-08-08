@@ -1,6 +1,6 @@
 pub const SSE = @This();
 
-socket: secsock.SecureSocket,
+tls: Secsock,
 writer: Writer.Allocating,
 runtime: *tardy.Runtime,
 
@@ -19,11 +19,11 @@ pub fn init(ctx: *const http.Context) !SSE {
     try ctx.response.headers_into_writer(ctx.header_writer, null);
     const headers = ctx.header_writer.buffered();
 
-    const sent = try ctx.socket.send_all(ctx.runtime, headers);
+    const sent = try ctx.tls.send_all(ctx.runtime, headers);
     if (sent != headers.len) return error.Closed;
 
     return .{
-        .socket = ctx.socket,
+        .tls = ctx.tls,
         .writer = writer,
         .runtime = ctx.runtime,
     };
@@ -52,7 +52,7 @@ pub fn send(self: *SSE, message: Message) !void {
     try writer.writeByte('\n');
 
     const written = aw.written();
-    const sent = try self.socket.send_all(self.runtime, written);
+    const sent = try self.tls.send_all(self.runtime, written);
     if (sent != written.len) return error.Closed;
 }
 
@@ -72,4 +72,4 @@ const Writer = std.Io.Writer;
 const zzz = @import("../root.zig");
 const http = zzz.http;
 const tardy = zzz.tardy;
-const secsock = zzz.secsock;
+const Secsock = zzz.Secsock;

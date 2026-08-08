@@ -1,5 +1,5 @@
 /// Internally exposed secsock.
-pub const secsock = @import("secsock");
+pub const Secsock = @import("secsock");
 /// Internally exposed Tardy.
 pub const tardy = @import("tardy");
 

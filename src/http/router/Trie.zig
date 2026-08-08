@@ -206,6 +206,7 @@ pub fn get_bundle(
 }
 
 fn TokenHashMap(comptime V: type) type {
+    // TODO: use unmanaged variants
     return std.HashMap(Token, V, struct {
         pub fn hash(self: @This(), input: Token) u64 {
             _ = self;

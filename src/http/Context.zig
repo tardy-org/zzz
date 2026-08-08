@@ -9,9 +9,9 @@ runtime: *Runtime,
 request: *const http.Request,
 response: *http.Response,
 /// Storage
-storage: *core.TypedStorage,
-/// Socket for this Connection.
-socket: secsock.SecureSocket,
+storage: *core.Storage,
+/// TCP Socket for this Connection.
+tls: Secsock,
 /// Slice of the URL Slug Captures
 captures: []const Trie.Capture,
 /// Map of the KV Query pairs in the URL
@@ -25,5 +25,5 @@ const core = zzz.core;
 const string_map = core.string_map;
 const http = zzz.http;
 const Runtime = zzz.tardy.Runtime;
-const secsock = zzz.secsock;
+const Secsock = zzz.Secsock;
 const Trie = @import("router/Trie.zig");

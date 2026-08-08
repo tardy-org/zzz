@@ -75,7 +75,7 @@ fn fs_dir_handler(ctx: *const http.Context, dir: fs.Dir) !http.Respond {
         else => unreachable,
     };
     const headers = ctx.header_writer.buffered();
-    const length = try ctx.socket.send_all(ctx.runtime, headers);
+    const length = try ctx.tls.send_all(ctx.runtime, headers);
     if (headers.len != length) return error.SendingHeadersFailed;
 
     // Reuse the header_buffer for file read/send
@@ -86,7 +86,7 @@ fn fs_dir_handler(ctx: *const http.Context, dir: fs.Dir) !http.Respond {
             else => return e,
         };
 
-        _ = ctx.socket.send(ctx.runtime, buffer[0..read_count]) catch |e| switch (e) {
+        _ = ctx.tls.send(ctx.runtime, buffer[0..read_count]) catch |e| switch (e) {
             error.Closed => break,
             else => return e,
         };

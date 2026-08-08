@@ -6,13 +6,91 @@ pub fn init(config: Config) Server {
     return .{ .config = config };
 }
 
-pub fn deinit(self: *const Server) void {
-    if (self.tls_ctx) |tls| {
-        tls.deinit();
+pub fn deinit(_: *const Server) void {}
+
+/// Serve an HTTP server.
+pub fn serve(
+    server: *const Server,
+    rt: *Runtime,
+    router: *const Router,
+    tls: *const Secsock,
+) !void {
+    const tls_info = tls.info();
+    log.info("security mode: {t}", .{tls_info.name});
+
+    const count = server.config.connection_count_max orelse 1024;
+    const pooling: pool.Kind = if (server.config.connection_count_max == null)
+        .grow
+    else
+        .static;
+
+    const provision_pool = try rt.allocator.create(
+        pool.Pool(Provision),
+    );
+    provision_pool.* = try .init(rt.allocator, count, pooling);
+    errdefer rt.allocator.destroy(provision_pool);
+
+    const connection_count = try rt.allocator.create(usize);
+    errdefer rt.allocator.destroy(connection_count);
+    connection_count.* = 0;
+
+    const accept_queued = try rt.allocator.create(bool);
+    errdefer rt.allocator.destroy(accept_queued);
+    accept_queued.* = true;
+
+    // Use a Max Header Size of 8KiB same as Nginx, Tomcat and Httpd but
+    // consider making this configurable
+    // https://stackoverflow.com/questions/686217/maximum-on-http-header-values
+    const max_http_header_size = 1024 * 8;
+    const pool_header_buffer: []u8 = try rt.allocator.alloc(
+        u8,
+        count * max_http_header_size,
+    );
+    errdefer rt.allocator.free(pool_header_buffer);
+    var next_header_buffer_index: usize = 0;
+
+    // initialize first batch of provisions :)
+    for (provision_pool.items) |*provision| {
+        provision.initalized = true;
+        provision.zc_recv_buffer = ZeroCopy(u8).init(
+            rt.allocator,
+            server.config.socket_buffer_bytes,
+        ) catch @panic("ZeroCopy OOM");
+
+        provision.header_writer = .fixed(
+            pool_header_buffer[next_header_buffer_index..][0..max_http_header_size],
+        );
+        next_header_buffer_index += max_http_header_size;
+
+        provision.arena = .init(rt.allocator);
+        provision.captures = rt.allocator.alloc(
+            Trie.Capture,
+            server.config.capture_count_max,
+        ) catch @panic("Captures OOM");
+
+        provision.queries = .init(rt.allocator);
+        provision.storage = .init(rt.allocator);
+        provision.request = .init(rt.allocator);
+        provision.response = .init(rt.allocator);
     }
+
+    try rt.spawn(
+        main_frame,
+        .{
+            rt,
+            server.config,
+            router,
+            tls,
+            provision_pool,
+            connection_count,
+            accept_queued,
+        },
+        server.config.stack_size,
+    );
 }
 
 fn prepare_new_request(
+    allocator: mem.Allocator,
     state: ?*State,
     provision: *Provision,
     config: Config,
@@ -27,6 +105,7 @@ fn prepare_new_request(
         .retain_with_limit = config.connection_arena_bytes_retain,
     });
     provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
+        allocator,
         config.socket_buffer_bytes,
     );
 
@@ -37,13 +116,13 @@ pub fn main_frame(
     rt: *Runtime,
     config: Config,
     router: *const Router,
-    server_socket: SecureSocket,
+    tls: *const Secsock,
     provisions: *pool.Pool(Provision),
     connection_count: *usize,
     accept_queued: *bool,
 ) !void {
     accept_queued.* = false;
-    const secure = server_socket.accept(rt) catch |e| {
+    var secure = tls.accept(rt) catch |e| {
         if (!accept_queued.*) {
             try rt.spawn(
                 main_frame,
@@ -51,7 +130,7 @@ pub fn main_frame(
                     rt,
                     config,
                     router,
-                    server_socket,
+                    tls,
                     provisions,
                     connection_count,
                     accept_queued,
@@ -62,19 +141,14 @@ pub fn main_frame(
         }
         return e;
     };
-    defer secure.socket.close_blocking();
-    defer secure.deinit();
+    defer secure.deinit(rt.allocator);
+    const secure_info = secure.info();
 
     connection_count.* += 1;
     defer connection_count.* -= 1;
 
-    if (secure.socket.addr.family() != .unix) {
-        try cross.socket.disable_nagle(secure.socket.handle);
-    }
-
     if (config.connection_count_max) |max| if (connection_count.* > max) {
-        log.debug("over connection max, closing", .{});
-        return;
+        return log.debug("over connection max, closing", .{});
     };
 
     log.debug("queuing up a new accept request", .{});
@@ -84,7 +158,7 @@ pub fn main_frame(
             rt,
             config,
             router,
-            server_socket,
+            tls,
             provisions,
             connection_count,
             accept_queued,
@@ -93,7 +167,7 @@ pub fn main_frame(
     );
     accept_queued.* = true;
 
-    const index = try provisions.borrow();
+    const index = try provisions.borrow(rt.allocator);
     defer provisions.release(index);
     const provision = provisions.get_ptr(index);
 
@@ -104,18 +178,18 @@ pub fn main_frame(
         provision.zc_recv_buffer = ZeroCopy(u8).init(
             rt.allocator,
             config.socket_buffer_bytes,
-        ) catch {
-            @panic("attempting to allocate more memory than available. (ZeroCopyBuffer)");
-        };
+        ) catch @panic("ZeroCopy OOM");
+
         provision.arena = .init(rt.allocator);
         // TODO: use a server config option
-        provision.header_writer = .fixed(try provision.arena.allocator().alloc(u8, 8 * 1024));
+        provision.header_writer = .fixed(
+            try provision.arena.allocator().alloc(u8, 8 * 1024),
+        );
         provision.captures = rt.allocator.alloc(
             Trie.Capture,
             config.capture_count_max,
-        ) catch {
-            @panic("attempting to allocate more memory than available. (Captures)");
-        };
+        ) catch @panic("Captures OOM");
+
         provision.queries = .init(rt.allocator);
         provision.storage = .init(rt.allocator);
         provision.request = .init(rt.allocator);
@@ -123,17 +197,16 @@ pub fn main_frame(
         provision.initalized = true;
     }
     defer prepare_new_request(
+        rt.allocator,
         null,
         provision,
         config,
     ) catch unreachable;
 
     var state: State = .{ .request = .header };
-    const buffer = try provision.zc_recv_buffer.get_write_area(
-        config.socket_buffer_bytes,
-    );
-    _ = buffer;
+
     provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
+        rt.allocator,
         config.socket_buffer_bytes,
     );
 
@@ -142,13 +215,16 @@ pub fn main_frame(
     http_loop: while (true) switch (state) {
         .request => |*kind| switch (kind.*) {
             .header => {
-                const recv_count = secure.recv(rt, provision.recv_slice) catch |e|
+                const recv_count = secure.recv(
+                    rt,
+                    provision.recv_slice,
+                ) catch |e|
                     switch (e) {
                         error.Closed => break,
-                        else => {
+                        else => |err| {
                             log.debug(
-                                "recv failed on socket | {}",
-                                .{e},
+                                "recv failed on socket | {t}",
+                                .{err},
                             );
                             break;
                         },
@@ -156,10 +232,13 @@ pub fn main_frame(
 
                 provision.zc_recv_buffer.mark_written(recv_count);
                 provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
+                    rt.allocator,
                     config.socket_buffer_bytes,
                 );
                 if (provision.zc_recv_buffer.len > config.request_bytes_max) break;
-                const search_area_start = (provision.zc_recv_buffer.len - recv_count) -| 4;
+
+                const search_area_start =
+                    (provision.zc_recv_buffer.len - recv_count) -| 4;
 
                 if (mem.find(
                     u8,
@@ -181,12 +260,12 @@ pub fn main_frame(
                         },
                     );
 
-                    log.info("rt{d} - \"{t} {s}\" {s} ({f})", .{
+                    log.info("rt{d} - \"{t} {s}\" {s} ({s})", .{
                         rt.id,
                         provision.request.method.?,
                         provision.request.uri.?,
                         provision.request.headers.get("User-Agent") orelse "N/A",
-                        secure.socket.addr,
+                        secure_info.address,
                     });
 
                     const content_length_str = provision.request.headers.get(
@@ -222,13 +301,16 @@ pub fn main_frame(
                     continue;
                 }
 
-                const recv_count = secure.recv(rt, provision.recv_slice) catch |e|
+                const recv_count = secure.recv(
+                    rt,
+                    provision.recv_slice,
+                ) catch |e|
                     switch (e) {
                         error.Closed => break,
-                        else => {
+                        else => |err| {
                             log.debug(
-                                "recv failed on socket | {}",
-                                .{e},
+                                "recv failed on socket | {t}",
+                                .{err},
                             );
                             break;
                         },
@@ -236,6 +318,7 @@ pub fn main_frame(
 
                 provision.zc_recv_buffer.mark_written(recv_count);
                 provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
+                    rt.allocator,
                     config.socket_buffer_bytes,
                 );
                 if (provision.zc_recv_buffer.len > config.request_bytes_max) break;
@@ -273,7 +356,7 @@ pub fn main_frame(
                 .request = &provision.request,
                 .response = &provision.response,
                 .storage = &provision.storage,
-                .socket = secure,
+                .tls = secure,
                 .captures = found.captures,
                 .queries = found.queries,
             };
@@ -284,19 +367,19 @@ pub fn main_frame(
                 .handler = h_with_data,
             };
 
-            const next_respond: http.Respond = next.run() catch |e| blk: {
-                log.warn("rt{d} - \"{s} {s}\" {} ({f})", .{
+            const next_respond: http.Respond = next.run() catch |err| blk: {
+                log.warn("rt{d} - \"{t} {s}\" {t} ({s})", .{
                     rt.id,
-                    @tagName(provision.request.method.?),
+                    provision.request.method.?,
                     provision.request.uri.?,
-                    e,
-                    secure.socket.addr,
+                    err,
+                    secure_info.address,
                 });
 
                 // If in Debug Mode, we will return the error name. In other modes,
                 // we won't to avoid leaking implemenation details.
                 const body = if (comptime builtin.mode == .debug)
-                    @errorName(e)
+                    @errorName(err)
                 else
                     "";
 
@@ -314,7 +397,9 @@ pub fn main_frame(
                     state = .respond;
                 },
                 .responded => {
-                    const connection = provision.request.headers.get("Connection") orelse "keep-alive";
+                    const connection = provision.request.headers.get(
+                        "Connection",
+                    ) orelse "keep-alive";
                     if (mem.eql(u8, connection, "close")) break :http_loop;
                     if (config.keepalive_count_max) |max| {
                         if (keepalive_count > max) {
@@ -329,6 +414,7 @@ pub fn main_frame(
                     }
 
                     try prepare_new_request(
+                        rt.allocator,
                         &state,
                         provision,
                         config,
@@ -360,15 +446,20 @@ pub fn main_frame(
                     sent + provision.recv_slice.len,
                 );
 
-                const sent_length = secure.send_all(rt, send_slice) catch |e| {
-                    log.debug("send failed on socket | {}", .{e});
+                const sent_length = secure.send_all(
+                    rt,
+                    send_slice,
+                ) catch |err| {
+                    log.debug("send failed on socket | {t}", .{err});
                     break;
                 };
                 if (sent_length != send_slice.len) break :http_loop;
                 sent += sent_length;
             }
 
-            const connection = provision.request.headers.get("Connection") orelse "keep-alive";
+            const connection = provision.request.headers.get(
+                "Connection",
+            ) orelse "keep-alive";
             if (mem.eql(u8, connection, "close")) break;
             if (config.keepalive_count_max) |max| {
                 if (keepalive_count > max) {
@@ -383,6 +474,7 @@ pub fn main_frame(
             }
 
             try prepare_new_request(
+                rt.allocator,
                 &state,
                 provision,
                 config,
@@ -390,7 +482,7 @@ pub fn main_frame(
         },
     };
 
-    log.info("connection ({f}) closed", .{secure.socket.addr});
+    log.info("connection ({s}) closed", .{secure_info.address});
 
     if (!accept_queued.*) {
         try rt.spawn(
@@ -399,7 +491,7 @@ pub fn main_frame(
                 rt,
                 config,
                 router,
-                server_socket,
+                tls,
                 provisions,
                 connection_count,
                 accept_queued,
@@ -408,91 +500,6 @@ pub fn main_frame(
         );
         accept_queued.* = true;
     }
-}
-
-/// Serve an HTTP server.
-pub fn serve(
-    self: *Server,
-    rt: *Runtime,
-    router: *const Router,
-    sock: SocketKind,
-) !void {
-    log.info("security mode: {t}", .{sock});
-
-    const secure: SecureSocket = switch (sock) {
-        .normal => |s| .unsecured(s),
-        .secure => |sec| sec,
-    };
-
-    const count = self.config.connection_count_max orelse 1024;
-    const pooling: pool.Kind = if (self.config.connection_count_max == null)
-        .grow
-    else
-        .static;
-
-    const provision_pool = try rt.allocator.create(pool.Pool(Provision));
-    provision_pool.* = try .init(rt.allocator, count, pooling);
-    errdefer rt.allocator.destroy(provision_pool);
-
-    const connection_count = try rt.allocator.create(usize);
-    errdefer rt.allocator.destroy(connection_count);
-    connection_count.* = 0;
-
-    const accept_queued = try rt.allocator.create(bool);
-    errdefer rt.allocator.destroy(accept_queued);
-    accept_queued.* = true;
-
-    // Use a Max Header Size of 8KiB same as Nginx, Tomcat and Httpd but
-    // consider making this configurable
-    // https://stackoverflow.com/questions/686217/maximum-on-http-header-values
-    const max_http_header_size = 1024 * 8;
-    const pool_header_buffer: []u8 = try rt.allocator.alloc(
-        u8,
-        count * max_http_header_size,
-    );
-    errdefer rt.allocator.free(pool_header_buffer);
-    var next_header_buffer_index: usize = 0;
-
-    // initialize first batch of provisions :)
-    for (provision_pool.items) |*provision| {
-        provision.initalized = true;
-        provision.zc_recv_buffer = ZeroCopy(u8).init(
-            rt.allocator,
-            self.config.socket_buffer_bytes,
-        ) catch {
-            @panic("attempting to allocate more memory than available. (ZeroCopy)");
-        };
-        provision.header_writer = .fixed(
-            pool_header_buffer[next_header_buffer_index..][0..max_http_header_size],
-        );
-        next_header_buffer_index += max_http_header_size;
-
-        provision.arena = .init(rt.allocator);
-        provision.captures = rt.allocator.alloc(
-            Trie.Capture,
-            self.config.capture_count_max,
-        ) catch {
-            @panic("attempting to allocate more memory than available. (Captures)");
-        };
-        provision.queries = .init(rt.allocator);
-        provision.storage = .init(rt.allocator);
-        provision.request = .init(rt.allocator);
-        provision.response = .init(rt.allocator);
-    }
-
-    try rt.spawn(
-        main_frame,
-        .{
-            rt,
-            self.config,
-            router,
-            secure,
-            provision_pool,
-            connection_count,
-            accept_queued,
-        },
-        self.config.stack_size,
-    );
 }
 
 /// These are various general configuration
@@ -521,6 +528,10 @@ pub const Config = struct {
     ///
     /// Default: `null`
     connection_count_max: ?u32 = null,
+    /// Maximum number of Captures in a Route
+    ///
+    /// Default: 8
+    capture_count_max: u16 = 8,
     /// Number of times a Request-Response can happen with keep-alive.
     ///
     /// Setting this to `null` will set no limit.
@@ -554,10 +565,6 @@ pub const Config = struct {
     ///
     /// Default: 1 KB
     socket_buffer_bytes: u32 = 1024,
-    /// Maximum number of Captures in a Route
-    ///
-    /// Default: 8
-    capture_count_max: u16 = 8,
     /// Maximum size (in bytes) of the Request.
     ///
     /// Default: 2MB
@@ -568,18 +575,18 @@ pub const Config = struct {
     request_uri_bytes_max: u32 = 1024 * 2,
 };
 
-const RequestBodyState = struct {
-    content_length: usize,
-    current_length: usize,
-};
-
-const RequestState = union(enum) {
+const Request = union(enum) {
     header,
-    body: RequestBodyState,
+    body: Body,
+
+    const Body = struct {
+        content_length: usize,
+        current_length: usize,
+    };
 };
 
 const State = union(enum) {
-    request: RequestState,
+    request: Request,
     handler,
     respond,
 };
@@ -589,18 +596,13 @@ pub const Provision = struct {
     recv_slice: []u8,
     zc_recv_buffer: ZeroCopy(u8),
     header_writer: Io.Writer,
+    // arena: std.heap.ArenaAllocator.State,
     arena: std.heap.ArenaAllocator,
-    storage: zcore.TypedStorage,
+    storage: zcore.Storage,
     captures: []Trie.Capture,
     queries: string_map.AnyCase,
     request: http.Request,
     response: http.Response,
-};
-
-// TODO: find an appropriate place for this
-const SocketKind = union(enum) {
-    normal: Socket,
-    secure: SecureSocket,
 };
 
 // TODO: find a find a more appropriate place for this
@@ -612,7 +614,7 @@ pub const TLSFileOptions = union(enum) {
     },
 };
 
-const log = std.log.scoped(.@"zzz/http/server");
+const log = std.log.scoped(.@"zzz/http/Server");
 
 const std = @import("std");
 const mem = std.mem;
@@ -631,10 +633,9 @@ const ZeroCopy = tcore.ZeroCopy;
 const cross = tardy.cross;
 const pool = tcore.pool;
 const Runtime = tardy.Runtime;
-const secsock = zzz.secsock;
-const SecureSocket = secsock.SecureSocket;
+const Secsock = zzz.Secsock;
 const Socket = tardy.net.Socket;
-pub const Task = Runtime.Task;
+const Task = Runtime.Task;
 const http = zzz.http;
 const Router = @import("Router.zig");
 const Route = Router.Route;
