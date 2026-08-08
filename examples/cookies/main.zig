@@ -1,27 +1,14 @@
-const std = @import("std");
-
-const zzz = @import("zzz");
-const http = zzz.http;
-const tardy = zzz.tardy;
-const Runtime = tardy.Runtime;
-const Socket = tardy.net.Socket;
-const Server = http.Server;
-const Router = http.Router;
-const Context = http.Context;
-const Route = Router.Route;
-const Middleware = http.Middleware;
-const Respond = http.Respond;
-const Cookie = http.Cookie;
-
-const log = std.log.scoped(.@"examples/cookies");
-
 const Tardy = tardy.Tardy(.auto);
 
-fn base_handler(ctx: *const Context, _: void) !Respond {
+fn hello_world(ctx: *const http.Context, _: void) !http.Respond {
     var iter = ctx.request.cookies.iterator();
-    while (iter.next()) |kv| log.debug("cookie: k={s} v={s}", .{ kv.key_ptr.*, kv.value_ptr.* });
+    while (iter.next()) |kv|
+        log.debug("cookie: k={s} v={s}", .{
+            kv.key_ptr.*,
+            kv.value_ptr.*,
+        });
 
-    const cookie: Cookie = .init("example_cookie", "abcdef123");
+    const cookie: http.Cookie = .init("example_cookie", "abcdef123");
     return ctx.response.apply(.{
         .status = .OK,
         .mime = .HTML,
@@ -36,38 +23,56 @@ pub fn main(init: std.process.Init) !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var t: Tardy = try .init(init.gpa, init.io, .{ .threading = .single });
-    defer t.deinit();
+    const transport: Secsock.Unsecured = .empty;
+    const tcp = try transport.tcp(init.gpa, .{
+        .host = host,
+        .port = port,
+    });
+    defer tcp.deinit(init.gpa);
 
-    var router: Router = try .init(init.gpa, &.{
-        Route.init("/").get({}, base_handler).layer(),
+    var router: http.Router = try .init(init.gpa, &.{
+        Route.init("/").get({}, hello_world).layer(),
     }, .{});
     defer router.deinit(init.gpa);
 
-    // create socket for tardy
-    var socket: Socket = try .init(init.io, .{ .tcp = .{ .host = host, .port = port } });
-    defer socket.close_blocking();
-    try socket.bind();
-    try socket.listen(4096);
-
     const EntryParams = struct {
-        router: *const Router,
-        socket: Socket,
+        router: *const http.Router,
+        tcp: *const Secsock,
     };
-    const params: EntryParams = .{ .router = &router, .socket = socket };
+    const params: EntryParams = .{
+        .router = &router,
+        .tcp = &tcp,
+    };
+
+    var t: Tardy = try .init(init.gpa, init.io, .{
+        .threading = .single,
+    });
+    defer t.deinit();
 
     try t.entry(
         params,
         struct {
-            fn entry(rt: *Runtime, p: EntryParams) !void {
-                var server: Server = .init(.{
-                    .stack_size = .@"4MiB",
+            fn entry(rt: *tardy.Runtime, p: EntryParams) !void {
+                const server: http.Server = .init(.{
+                    .stack_size = .@"1MiB",
                     .socket_buffer_bytes = 1024 * 2,
                     .keepalive_count_max = null,
                     .connection_count_max = 10,
                 });
-                try server.serve(rt, p.router, .{ .normal = p.socket });
+
+                try server.serve(rt, p.router, p.tcp);
+                defer server.deinit();
             }
         }.entry,
     );
 }
+
+const log = std.log.scoped(.@"examples/cookies");
+
+const std = @import("std");
+
+const zzz = @import("zzz");
+const http = zzz.http;
+const tardy = zzz.tardy;
+const Secsock = zzz.Secsock;
+const Route = http.Router.Route;

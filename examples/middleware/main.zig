@@ -1,23 +1,56 @@
-const std = @import("std");
-
-const zzz = @import("zzz");
-const http = zzz.http;
-const tardy = zzz.tardy;
-const Runtime = tardy.Runtime;
-const Socket = tardy.net.Socket;
-const Server = http.Server;
-const Router = http.Router;
-const Context = http.Context;
-const Route = Router.Route;
-const Respond = http.Respond;
-const Middleware = Router.Middleware;
-const Next = Middleware.Next;
-
-const log = std.log.scoped(.@"examples/middleware");
-
 const Tardy = tardy.Tardy(.auto);
 
-fn root_handler(ctx: *const Context, id: i8) !Respond {
+pub fn main(init: std.process.Init) !void {
+    const host: []const u8 = "0.0.0.0";
+    const port: u16 = 9862;
+
+    const transport: Secsock.Unsecured = .empty;
+    const tcp = try transport.tcp(init.gpa, .{
+        .host = host,
+        .port = port,
+        .backlog = 256,
+    });
+    defer tcp.deinit(init.gpa);
+
+    var t: Tardy = try .init(init.gpa, init.io, .{
+        .threading = .single,
+    });
+    defer t.deinit();
+
+    const num: i8 = 12;
+
+    var router: http.Router = try .init(init.gpa, &.{
+        Middleware.init({}, passing_middleware).layer(),
+        Route.init("/").get(num, root_handler).layer(),
+        Middleware.init({}, failing_middleware).layer(),
+        Route.init("/").post(num, root_handler).layer(),
+        Route.init("/fail").get(num, root_handler).layer(),
+    }, .{});
+    defer router.deinit(init.gpa);
+
+    const EntryParams = struct {
+        router: *const http.Router,
+        tcp: *const Secsock,
+    };
+    const params: EntryParams = .{
+        .router = &router,
+        .tcp = &tcp,
+    };
+
+    try t.entry(
+        params,
+        struct {
+            fn entry(rt: *tardy.Runtime, p: EntryParams) !void {
+                const server: http.Server = .init(.{});
+
+                try server.serve(rt, p.router, p.tcp);
+                defer server.deinit();
+            }
+        }.entry,
+    );
+}
+
+fn root_handler(ctx: *const http.Context, id: i8) !http.Respond {
     const body_fmt =
         \\ <!DOCTYPE html>
         \\ <html>
@@ -44,56 +77,24 @@ fn root_handler(ctx: *const Context, id: i8) !Respond {
     });
 }
 
-fn passing_middleware(next: *Next, _: void) !Respond {
+fn passing_middleware(next: *Middleware.Next, _: void) !http.Respond {
     log.info("pass middleware: {s}", .{next.context.request.uri.?});
     try next.context.storage.put(usize, 100);
     return try next.run();
 }
 
-fn failing_middleware(next: *Next, _: void) !Respond {
+fn failing_middleware(next: *Middleware.Next, _: void) !http.Respond {
     log.info("fail middleware: {s}", .{next.context.request.uri.?});
     return error.FailingMiddleware;
 }
 
-pub fn main(init: std.process.Init) !void {
-    const host: []const u8 = "0.0.0.0";
-    const port: u16 = 9862;
+const log = std.log.scoped(.@"examples/middleware");
 
-    var t: Tardy = try .init(init.gpa, init.io, .{ .threading = .single });
-    defer t.deinit();
+const std = @import("std");
 
-    const num: i8 = 12;
-
-    var router: Router = try .init(init.gpa, &.{
-        Middleware.init({}, passing_middleware).layer(),
-        Route.init("/").get(num, root_handler).layer(),
-        Middleware.init({}, failing_middleware).layer(),
-        Route.init("/").post(num, root_handler).layer(),
-        Route.init("/fail").get(num, root_handler).layer(),
-    }, .{});
-    defer router.deinit(init.gpa);
-
-    var socket: Socket = try .init(init.io, .{
-        .tcp = .{ .host = host, .port = port },
-    });
-    defer socket.close_blocking();
-
-    try socket.bind();
-    try socket.listen(256);
-
-    const EntryParams = struct {
-        router: *const Router,
-        socket: Socket,
-    };
-    const params: EntryParams = .{ .router = &router, .socket = socket };
-
-    try t.entry(
-        params,
-        struct {
-            fn entry(rt: *Runtime, p: EntryParams) !void {
-                var server: Server = .init(.{});
-                try server.serve(rt, p.router, .{ .normal = p.socket });
-            }
-        }.entry,
-    );
-}
+const zzz = @import("zzz");
+const http = zzz.http;
+const tardy = zzz.tardy;
+const Secsock = zzz.Secsock;
+const Route = http.Router.Route;
+const Middleware = http.Router.Middleware;
