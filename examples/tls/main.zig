@@ -1,6 +1,6 @@
 const Tardy = tardy.Tardy(.auto);
 
-fn root_handler(ctx: *const Context, _: void) !Respond {
+fn handler(ctx: *const http.Context, _: void) !http.Respond {
     const body =
         \\ <!DOCTYPE html>
         \\ <html>
@@ -20,16 +20,28 @@ fn root_handler(ctx: *const Context, _: void) !Respond {
     });
 }
 
+// Test with: https://localhost:9862/
 pub fn main(init: std.process.Init) !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var t: Tardy = try .init(init.gpa, init.io, .{ .threading = .auto });
-    defer t.deinit();
+    var bearssl: Secsock.BearSSL = try .init(
+        init.gpa,
+        "CERTIFICATE",
+        @embedFile("certs/cert.pem"),
+        "EC PRIVATE KEY",
+        @embedFile("certs/key.pem"),
+    );
+    defer bearssl.deinit(init.gpa);
 
-    var router: Router = try .init(init.gpa, &.{
-        Route.init("/").get({}, root_handler).layer(),
-        Compression(.{ .gzip = .{} }),
+    const tls = try bearssl.tls(init.gpa, .{
+        .host = host,
+        .port = port,
+    });
+
+    var router: http.Router = try .init(init.gpa, &.{
+        Route.init("/").get({}, handler).layer(),
+        middleware.Compression(.{ .gzip = .{} }),
         Route.init("/embed/pico.min.css").embed_file(
             .{ .mime = .CSS },
             @embedFile("embed/pico.min.css"),
@@ -37,38 +49,28 @@ pub fn main(init: std.process.Init) !void {
     }, .{});
     defer router.deinit(init.gpa);
 
-    // create socket for tardy
-    var socket: Socket = try .init(init.io, .{
-        .tcp = .{ .host = host, .port = port },
-    });
-    defer socket.close_blocking();
-
-    try socket.bind();
-    try socket.listen(1024);
-
-    var bearssl: secsock.BearSSL = .init(init.gpa);
-    defer bearssl.deinit();
-
-    try bearssl.add_cert_chain(
-        "CERTIFICATE",
-        @embedFile("certs/cert.pem"),
-        "EC PRIVATE KEY",
-        @embedFile("certs/key.pem"),
-    );
-    const secure = try bearssl.to_secure_socket(socket, .server);
-
     const EntryParams = struct {
-        router: *const Router,
-        socket: SecureSocket,
+        router: *const http.Router,
+        tls: *const Secsock,
     };
-    const params: EntryParams = .{ .router = &router, .socket = secure };
+    const params: EntryParams = .{
+        .router = &router,
+        .tls = &tls,
+    };
+
+    var t: Tardy = try .init(init.gpa, init.io, .{
+        .threading = .auto,
+    });
+    defer t.deinit();
 
     try t.entry(
         params,
         struct {
-            fn entry(rt: *Runtime, p: EntryParams) !void {
-                var server: Server = .init(.{ .stack_size = .max });
-                try server.serve(rt, p.router, .{ .secure = p.socket });
+            fn entry(rt: *tardy.Runtime, p: EntryParams) !void {
+                const server: http.Server = .init(.{ .stack_size = .max });
+
+                try server.serve(rt, p.router, p.tls);
+                defer server.deinit();
             }
         }.entry,
     );
@@ -81,13 +83,6 @@ const std = @import("std");
 const zzz = @import("zzz");
 const http = zzz.http;
 const tardy = zzz.tardy;
-const Runtime = tardy.Runtime;
-const Socket = tardy.net.Socket;
-const Server = http.Server;
-const Context = http.Context;
-const Router = http.Router;
-const Respond = http.Respond;
-const secsock = zzz.secsock;
-const SecureSocket = secsock.SecureSocket;
-const Compression = http.middleware.Compression;
-const Route = Router.Route;
+const Secsock = zzz.Secsock;
+const middleware = http.middleware;
+const Route = http.Router.Route;
