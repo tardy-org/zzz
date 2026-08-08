@@ -1,24 +1,6 @@
-const std = @import("std");
-
-const zzz = @import("zzz");
-const http = zzz.http;
-const tardy = zzz.tardy;
-const Runtime = tardy.Runtime;
-const Socket = tardy.net.Socket;
-const Server = http.Server;
-const Router = http.Router;
-const Context = http.Context;
-const Route = Router.Route;
-const form = http.form;
-const Form = form.Form;
-const Query = form.Query;
-const Respond = http.Respond;
-
-const log = std.log.scoped(.@"examples/form");
-
 const Tardy = tardy.Tardy(.auto);
 
-fn base_handler(ctx: *const Context, _: void) !Respond {
+fn home(ctx: *const http.Context, _: void) !http.Respond {
     const body =
         \\<form>
         \\    <label for="fname">First name:</label>
@@ -50,10 +32,10 @@ const UserInfo = struct {
     weight: ?[]const u8,
 };
 
-fn generate_handler(ctx: *const Context, _: void) !Respond {
+fn generate(ctx: *const http.Context, _: void) !http.Respond {
     const info = switch (ctx.request.method.?) {
-        .GET => try Query(UserInfo).parse(ctx.allocator, ctx),
-        .POST => try Form(UserInfo).parse(ctx.allocator, ctx),
+        .GET => try form.Query(UserInfo).parse(ctx.allocator, ctx),
+        .POST => try form.Form(UserInfo).parse(ctx.allocator, ctx),
         else => return error.UnexpectedMethod,
     };
 
@@ -81,41 +63,62 @@ pub fn main(init: std.process.Init) !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var t: Tardy = try .init(init.gpa, init.io, .{ .threading = .auto });
-    defer t.deinit();
+    const transport: Secsock.Unsecured = .empty;
+    const tcp = try transport.tcp(init.gpa, .{
+        .host = host,
+        .port = port,
+    });
+    defer tcp.deinit(init.gpa);
 
-    var router: Router = try .init(init.gpa, &.{
-        Route.init("/").get({}, base_handler).layer(),
-        Route.init("/generate").get({}, generate_handler).post(
+    var router: http.Router = try .init(init.gpa, &.{
+        Route.init("/").get({}, home).layer(),
+        Route.init("/generate").get(
             {},
-            generate_handler,
+            generate,
+        ).post(
+            {},
+            generate,
         ).layer(),
     }, .{});
     defer router.deinit(init.gpa);
 
-    var socket: Socket = try .init(init.io, .{
-        .tcp = .{ .host = host, .port = port },
+    var t: Tardy = try .init(init.gpa, init.io, .{
+        .threading = .auto,
     });
-    defer socket.close_blocking();
-    try socket.bind();
-    try socket.listen(4096);
+    defer t.deinit();
 
     const EntryParams = struct {
-        router: *const Router,
-        socket: Socket,
+        router: *const http.Router,
+        tls: *const Secsock,
     };
-    const params: EntryParams = .{ .router = &router, .socket = socket };
+    const params: EntryParams = .{
+        .router = &router,
+        .tls = &tcp,
+    };
 
     try t.entry(
         params,
         struct {
-            fn entry(rt: *Runtime, p: EntryParams) !void {
-                var server: Server = .init(.{
-                    .stack_size = .@"4MiB",
+            fn entry(rt: *tardy.Runtime, p: EntryParams) !void {
+                const server: http.Server = .init(.{
+                    .stack_size = .@"1MiB",
                     .socket_buffer_bytes = 1024 * 2,
                 });
-                try server.serve(rt, p.router, .{ .normal = p.socket });
+
+                try server.serve(rt, p.router, p.tls);
+                defer server.deinit();
             }
         }.entry,
     );
 }
+
+const log = std.log.scoped(.@"examples/form");
+
+const std = @import("std");
+
+const zzz = @import("zzz");
+const http = zzz.http;
+const tardy = zzz.tardy;
+const form = http.form;
+const Secsock = zzz.Secsock;
+const Route = http.Router.Route;
