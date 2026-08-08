@@ -11,7 +11,7 @@ response: *http.Response,
 /// Storage
 storage: *core.Storage,
 /// TCP Socket for this Connection.
-tls: Secsock,
+tls: *Secsock,
 /// Slice of the URL Slug Captures
 captures: []const Trie.Capture,
 /// Map of the KV Query pairs in the URL

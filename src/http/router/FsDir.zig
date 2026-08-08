@@ -31,7 +31,11 @@ fn fs_dir_handler(ctx: *const http.Context, dir: fs.Dir) !http.Respond {
         }
     };
 
-    const file = dir.open_file(ctx.runtime, file_path_z, .{ .mode = .read }) catch |e| switch (e) {
+    const file = dir.open_file(
+        ctx.runtime,
+        file_path_z,
+        .{ .mode = .read },
+    ) catch |e| switch (e) {
         error.NotFound => {
             return ctx.response.apply(.{
                 .status = .@"Not Found",
@@ -70,7 +74,10 @@ fn fs_dir_handler(ctx: *const http.Context, dir: fs.Dir) !http.Respond {
     response.status = .OK;
     response.mime = mime;
 
-    response.headers_into_writer(ctx.header_writer, stat.size) catch |err| switch (err) {
+    response.headers_into_writer(
+        ctx.header_writer,
+        stat.size,
+    ) catch |err| switch (err) {
         error.WriteFailed => return error.ExceededMaxHttpHeaderSize,
         else => unreachable,
     };
@@ -81,12 +88,19 @@ fn fs_dir_handler(ctx: *const http.Context, dir: fs.Dir) !http.Respond {
     // Reuse the header_buffer for file read/send
     var buffer = ctx.header_writer.buffer[0..];
     while (true) {
-        const read_count = file.read(ctx.runtime, buffer, null) catch |e| switch (e) {
+        const read_count = file.read(
+            ctx.runtime,
+            buffer,
+            null,
+        ) catch |e| switch (e) {
             error.EndOfFile => break,
             else => return e,
         };
 
-        _ = ctx.tls.send(ctx.runtime, buffer[0..read_count]) catch |e| switch (e) {
+        _ = ctx.tls.send(
+            ctx.runtime,
+            buffer[0..read_count],
+        ) catch |e| switch (e) {
             error.Closed => break,
             else => return e,
         };

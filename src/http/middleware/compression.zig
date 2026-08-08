@@ -24,16 +24,20 @@ pub fn Compression(comptime compression: Kind) Middleware.Layer {
             fn gzip_mw(next: *Middleware.Next, _: void) !http.Respond {
                 const respond = try next.run();
                 const response = next.context.response;
-                if (response.body) |body| if (respond == .standard) {
+                if (response.body) |body| if (body.len != 0 and
+                    respond == .standard)
+                {
                     var compressed: std.Io.Writer.Allocating = try .initCapacity(
                         next.context.allocator,
-                        body.len,
+                        // flate compress requires a buffer > 8
+                        if (body.len < 9) body.len + 8 else body.len,
                     );
                     errdefer compressed.deinit();
 
+                    var history_window: [flate.max_window_len]u8 = undefined;
                     var body_stream: flate.Compress = try .init(
                         &compressed.writer,
-                        &.{},
+                        &history_window,
                         gzip.container,
                         gzip.level,
                     );

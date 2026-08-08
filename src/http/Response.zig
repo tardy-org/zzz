@@ -5,6 +5,8 @@ mime: ?Mime = null,
 body: ?[]const u8 = null,
 headers: string_map.AnyCase,
 
+// TODO: there shouldn't be a need for this, we should be able to use
+// reponse everywhere or update it to the needed use cases
 pub const Fields = struct {
     status: Status,
     mime: Mime,
@@ -50,7 +52,7 @@ pub fn headers_into_writer(
     );
 
     // Headers
-    try writer.writeAll("Server: zzz\r\nConnection: keep-alive\r\n");
+    try writer.writeAll("Server: Zzz\r\nConnection: keep-alive\r\n");
     var iter = self.headers.iterator();
     while (iter.next()) |entry| try writer.print(
         "{s}: {s}\r\n",

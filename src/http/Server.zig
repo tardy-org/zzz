@@ -356,7 +356,7 @@ pub fn main_frame(
                 .request = &provision.request,
                 .response = &provision.response,
                 .storage = &provision.storage,
-                .tls = secure,
+                .tls = &secure,
                 .captures = found.captures,
                 .queries = found.queries,
             };
