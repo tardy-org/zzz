@@ -12,31 +12,31 @@ pub fn main(init: std.process.Init) !void {
     const host: []const u8 = "0.0.0.0";
     const port: u16 = 9862;
 
-    var t: Tardy = try .init(init.gpa, init.io, .{
-        .threading = .auto,
+    const transport: Secsock.Unsecured = .empty;
+    const tcp = try transport.tcp(init.gpa, .{
+        .host = host,
+        .port = port,
     });
-    defer t.deinit();
+    defer tcp.deinit(init.gpa);
 
     var router: http.Router = try .init(init.gpa, &.{
         Route.init("/").get({}, hello_world).layer(),
     }, .{});
     defer router.deinit(init.gpa);
 
-    var socket: net.Socket = try .init(init.io, .{
-        .tcp = .{ .host = host, .port = port },
-    });
-    defer socket.close_blocking();
-    try socket.bind();
-    try socket.listen(4096);
-
     const EntryParams = struct {
         router: *const http.Router,
-        socket: net.Socket,
+        tls: *const Secsock,
     };
     const params: EntryParams = .{
         .router = &router,
-        .socket = socket,
+        .tls = &tcp,
     };
+
+    var t: Tardy = try .init(init.gpa, init.io, .{
+        .threading = .auto,
+    });
+    defer t.deinit();
 
     try t.entry(
         params,
@@ -48,9 +48,9 @@ pub fn main(init: std.process.Init) !void {
                     .keepalive_count_max = null,
                     .connection_count_max = 1024,
                 });
-                try server.serve(rt, p.router, .{
-                    .normal = p.socket,
-                });
+
+                try server.serve(rt, p.router, p.tls);
+                defer server.deinit();
             }
         }.entry,
     );
@@ -62,6 +62,6 @@ const std = @import("std");
 
 const zzz = @import("zzz");
 const http = zzz.http;
+const Secsock = zzz.Secsock;
 const tardy = zzz.tardy;
-const net = tardy.net;
 const Route = http.Router.Route;
