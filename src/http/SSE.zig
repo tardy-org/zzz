@@ -1,6 +1,6 @@
 pub const SSE = @This();
 
-tls: Secsock,
+tls: *Secsock,
 writer: Writer.Allocating,
 runtime: *tardy.Runtime,
 
@@ -16,7 +16,10 @@ pub fn init(ctx: *const http.Context) !SSE {
     var writer: Writer.Allocating = .init(ctx.allocator);
     errdefer writer.deinit();
 
-    try ctx.response.headers_into_writer(ctx.header_writer, null);
+    try ctx.response.headers_into_writer(
+        ctx.header_writer,
+        null,
+    );
     const headers = ctx.header_writer.buffered();
 
     const sent = try ctx.tls.send_all(ctx.runtime, headers);
