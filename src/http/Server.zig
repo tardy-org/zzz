@@ -343,7 +343,7 @@ pub fn main_frame(
                 provision.response.headers.clearRetainingCapacity();
                 provision.response.status = .@"Method Not Allowed";
                 provision.response.mime = .TEXT;
-                provision.response.body = "";
+                provision.response.body = null;
 
                 state = .respond;
                 continue;
@@ -424,6 +424,7 @@ pub fn main_frame(
             }
         },
         .respond => {
+            // TODO: lets use optional properly
             const body = provision.response.body orelse "";
             const content_length = body.len;
 
