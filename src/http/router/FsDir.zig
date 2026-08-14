@@ -10,7 +10,7 @@ fn fs_dir_handler(ctx: *const http.Context, dir: fs.Dir) !http.Respond {
 
     // Resolving the requested file.
     const search_path = ctx.captures[0].remaining;
-    const file_path_z = try ctx.allocator.dupeSentinel(
+    const file_path_z = try ctx.arena.dupeSentinel(
         u8,
         search_path,
         0x0,
@@ -53,7 +53,7 @@ fn fs_dir_handler(ctx: *const http.Context, dir: fs.Dir) !http.Respond {
     }
     const etag_hash = hash.final();
 
-    const calc_etag = try ctx.allocator.print(
+    const calc_etag = try ctx.arena.print(
         "\"{d}\"",
         .{etag_hash},
     );

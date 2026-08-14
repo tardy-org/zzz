@@ -18,42 +18,42 @@ pub fn serve(
     const tls_info = tls.info();
     log.info("security mode: {t}", .{tls_info.name});
 
-    const count = server.config.connection_count_max orelse 1024;
-    const pooling: pool.Kind = if (server.config.connection_count_max == null)
+    const count = server.config.max_connection_count orelse 1024;
+    const pooling: pool.Kind = if (server.config.max_connection_count == null)
         .grow
     else
         .static;
 
-    const provision_pool = try rt.allocator.create(
+    const provision_pool = try rt.gpa.create(
         pool.Pool(Provision),
     );
-    provision_pool.* = try .init(rt.allocator, count, pooling);
-    errdefer rt.allocator.destroy(provision_pool);
+    provision_pool.* = try .init(rt.gpa, count, pooling);
+    errdefer rt.gpa.destroy(provision_pool);
 
-    const connection_count = try rt.allocator.create(usize);
-    errdefer rt.allocator.destroy(connection_count);
+    const connection_count = try rt.gpa.create(usize);
+    errdefer rt.gpa.destroy(connection_count);
     connection_count.* = 0;
 
-    const accept_queued = try rt.allocator.create(bool);
-    errdefer rt.allocator.destroy(accept_queued);
+    const accept_queued = try rt.gpa.create(bool);
+    errdefer rt.gpa.destroy(accept_queued);
     accept_queued.* = true;
 
     // Use a Max Header Size of 8KiB same as Nginx, Tomcat and Httpd but
     // consider making this configurable
     // https://stackoverflow.com/questions/686217/maximum-on-http-header-values
     const max_http_header_size = 1024 * 8;
-    const pool_header_buffer: []u8 = try rt.allocator.alloc(
+    const pool_header_buffer: []u8 = try rt.gpa.alloc(
         u8,
         count * max_http_header_size,
     );
-    errdefer rt.allocator.free(pool_header_buffer);
+    errdefer rt.gpa.free(pool_header_buffer);
     var next_header_buffer_index: usize = 0;
 
     // initialize first batch of provisions :)
     for (provision_pool.items) |*provision| {
         provision.initalized = true;
         provision.zc_recv_buffer = ZeroCopy(u8).init(
-            rt.allocator,
+            rt.gpa,
             server.config.socket_buffer_bytes,
         ) catch @panic("ZeroCopy OOM");
 
@@ -62,20 +62,20 @@ pub fn serve(
         );
         next_header_buffer_index += max_http_header_size;
 
-        provision.arena = .init(rt.allocator);
-        provision.captures = rt.allocator.alloc(
+        provision.arena = .init(rt.gpa);
+        provision.captures = rt.gpa.alloc(
             Trie.Capture,
-            server.config.capture_count_max,
+            server.config.max_capture_count,
         ) catch @panic("Captures OOM");
 
-        provision.queries = .init(rt.allocator);
-        provision.storage = .init(rt.allocator);
-        provision.request = .init(rt.allocator);
-        provision.response = .init(rt.allocator);
+        provision.queries = .init(rt.gpa);
+        provision.storage = .init(rt.gpa);
+        provision.request = .init(rt.gpa);
+        provision.response = .init(rt.gpa);
     }
 
     try rt.spawn(
-        main_frame,
+        mainLoop,
         .{
             rt,
             server.config,
@@ -89,30 +89,7 @@ pub fn serve(
     );
 }
 
-fn prepare_new_request(
-    allocator: mem.Allocator,
-    state: ?*State,
-    provision: *Provision,
-    config: Config,
-) !void {
-    debug.assert(provision.initalized);
-    provision.request.clear();
-    provision.response.clear();
-    provision.storage.clear();
-    provision.zc_recv_buffer.clear_retaining_capacity();
-    _ = provision.header_writer.consumeAll();
-    _ = provision.arena.reset(.{
-        .retain_with_limit = config.connection_arena_bytes_retain,
-    });
-    provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
-        allocator,
-        config.socket_buffer_bytes,
-    );
-
-    if (state) |s| s.* = .{ .request = .header };
-}
-
-pub fn main_frame(
+pub fn mainLoop(
     rt: *Runtime,
     config: Config,
     router: *const Router,
@@ -125,7 +102,7 @@ pub fn main_frame(
     var secure = tls.accept(rt) catch |e| {
         if (!accept_queued.*) {
             try rt.spawn(
-                main_frame,
+                mainLoop,
                 .{
                     rt,
                     config,
@@ -141,19 +118,19 @@ pub fn main_frame(
         }
         return e;
     };
-    defer secure.deinit(rt.allocator);
+    defer secure.deinit(rt.gpa);
     const secure_info = secure.info();
 
     connection_count.* += 1;
     defer connection_count.* -= 1;
 
-    if (config.connection_count_max) |max| if (connection_count.* > max) {
+    if (config.max_connection_count) |max| if (connection_count.* > max) {
         return log.debug("over connection max, closing", .{});
     };
 
     log.debug("queuing up a new accept request", .{});
     try rt.spawn(
-        main_frame,
+        mainLoop,
         .{
             rt,
             config,
@@ -167,7 +144,7 @@ pub fn main_frame(
     );
     accept_queued.* = true;
 
-    const index = try provisions.borrow(rt.allocator);
+    const index = try provisions.borrow(rt.gpa);
     defer provisions.release(index);
     const provision = provisions.get_ptr(index);
 
@@ -176,28 +153,28 @@ pub fn main_frame(
     if (!provision.initalized) {
         log.debug("initalizing new provision", .{});
         provision.zc_recv_buffer = ZeroCopy(u8).init(
-            rt.allocator,
+            rt.gpa,
             config.socket_buffer_bytes,
         ) catch @panic("ZeroCopy OOM");
 
-        provision.arena = .init(rt.allocator);
+        provision.arena = .init(rt.gpa);
         // TODO: use a server config option
         provision.header_writer = .fixed(
             try provision.arena.allocator().alloc(u8, 8 * 1024),
         );
-        provision.captures = rt.allocator.alloc(
+        provision.captures = rt.gpa.alloc(
             Trie.Capture,
-            config.capture_count_max,
+            config.max_capture_count,
         ) catch @panic("Captures OOM");
 
-        provision.queries = .init(rt.allocator);
-        provision.storage = .init(rt.allocator);
-        provision.request = .init(rt.allocator);
-        provision.response = .init(rt.allocator);
+        provision.queries = .init(rt.gpa);
+        provision.storage = .init(rt.gpa);
+        provision.request = .init(rt.gpa);
+        provision.response = .init(rt.gpa);
         provision.initalized = true;
     }
     defer prepare_new_request(
-        rt.allocator,
+        rt.gpa,
         null,
         provision,
         config,
@@ -206,7 +183,7 @@ pub fn main_frame(
     var state: State = .{ .request = .header };
 
     provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
-        rt.allocator,
+        rt.gpa,
         config.socket_buffer_bytes,
     );
 
@@ -232,10 +209,10 @@ pub fn main_frame(
 
                 provision.zc_recv_buffer.mark_written(recv_count);
                 provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
-                    rt.allocator,
+                    rt.gpa,
                     config.socket_buffer_bytes,
                 );
-                if (provision.zc_recv_buffer.len > config.request_bytes_max) break;
+                if (provision.zc_recv_buffer.len > config.max_request_bytes) break;
 
                 const search_area_start =
                     (provision.zc_recv_buffer.len - recv_count) -| 4;
@@ -255,8 +232,8 @@ pub fn main_frame(
                             .{ .end = real_header_end },
                         ),
                         .{
-                            .request_bytes_max = config.request_bytes_max,
-                            .request_uri_bytes_max = config.request_uri_bytes_max,
+                            .max_request_bytes = config.max_request_bytes,
+                            .max_uri_bytes = config.max_request_uri_bytes,
                         },
                     );
 
@@ -318,10 +295,10 @@ pub fn main_frame(
 
                 provision.zc_recv_buffer.mark_written(recv_count);
                 provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
-                    rt.allocator,
+                    rt.gpa,
                     config.socket_buffer_bytes,
                 );
-                if (provision.zc_recv_buffer.len > config.request_bytes_max) break;
+                if (provision.zc_recv_buffer.len > config.max_request_bytes) break;
 
                 info.current_length += recv_count;
                 debug.assert(info.current_length <= info.content_length);
@@ -329,13 +306,13 @@ pub fn main_frame(
         },
         .handler => {
             const found = try router.get_bundle_from_host(
-                rt.allocator,
+                rt.gpa,
                 provision.request.uri.?,
                 provision.captures,
                 &provision.queries,
             );
-            defer rt.allocator.free(found.duped);
-            defer for (found.duped) |dupe| rt.allocator.free(dupe);
+            defer rt.gpa.free(found.duped);
+            defer for (found.duped) |dupe| rt.gpa.free(dupe);
 
             const h_with_data: Route.Handler.WithData = found.route.get_handler(
                 provision.request.method.?,
@@ -351,7 +328,7 @@ pub fn main_frame(
 
             const context: http.Context = .{
                 .runtime = rt,
-                .allocator = provision.arena.allocator(),
+                .arena = provision.arena.allocator(),
                 .header_writer = &provision.header_writer,
                 .request = &provision.request,
                 .response = &provision.response,
@@ -401,7 +378,7 @@ pub fn main_frame(
                         "Connection",
                     ) orelse "keep-alive";
                     if (mem.eql(u8, connection, "close")) break :http_loop;
-                    if (config.keepalive_count_max) |max| {
+                    if (config.max_keepalive_count) |max| {
                         if (keepalive_count > max) {
                             log.debug(
                                 "closing connection, exceeded keepalive max",
@@ -414,7 +391,7 @@ pub fn main_frame(
                     }
 
                     try prepare_new_request(
-                        rt.allocator,
+                        rt.gpa,
                         &state,
                         provision,
                         config,
@@ -462,7 +439,7 @@ pub fn main_frame(
                 "Connection",
             ) orelse "keep-alive";
             if (mem.eql(u8, connection, "close")) break;
-            if (config.keepalive_count_max) |max| {
+            if (config.max_keepalive_count) |max| {
                 if (keepalive_count > max) {
                     log.debug(
                         "closing connection, exceeded keepalive max",
@@ -475,7 +452,7 @@ pub fn main_frame(
             }
 
             try prepare_new_request(
-                rt.allocator,
+                rt.gpa,
                 &state,
                 provision,
                 config,
@@ -487,7 +464,7 @@ pub fn main_frame(
 
     if (!accept_queued.*) {
         try rt.spawn(
-            main_frame,
+            mainLoop,
             .{
                 rt,
                 config,
@@ -501,6 +478,29 @@ pub fn main_frame(
         );
         accept_queued.* = true;
     }
+}
+
+fn prepare_new_request(
+    allocator: mem.Allocator,
+    state: ?*State,
+    provision: *Provision,
+    config: Config,
+) !void {
+    debug.assert(provision.initalized);
+    provision.request.clear();
+    provision.response.clear();
+    provision.storage.clear();
+    provision.zc_recv_buffer.clear_retaining_capacity();
+    _ = provision.header_writer.consumeAll();
+    _ = provision.arena.reset(.{
+        .retain_with_limit = config.retained_arena_bytes,
+    });
+    provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
+        allocator,
+        config.socket_buffer_bytes,
+    );
+
+    if (state) |s| s.* = .{ .request = .header };
 }
 
 /// These are various general configuration
@@ -528,17 +528,17 @@ pub const Config = struct {
     /// You can set this to `null` to have no maximum.
     ///
     /// Default: `null`
-    connection_count_max: ?u32 = null,
+    max_connection_count: ?u32 = null,
     /// Maximum number of Captures in a Route
     ///
     /// Default: 8
-    capture_count_max: u16 = 8,
+    max_capture_count: u16 = 8,
     /// Number of times a Request-Response can happen with keep-alive.
     ///
     /// Setting this to `null` will set no limit.
     ///
     /// Default: `null`
-    keepalive_count_max: ?u16 = null,
+    max_keepalive_count: ?u16 = null,
     /// Amount of allocated memory retained
     /// after an arena is cleared.
     ///
@@ -548,32 +548,32 @@ pub const Config = struct {
     /// A lower value will reduce memory usage but
     /// will make allocators slower.
     ///
-    /// Default: 1KB
-    connection_arena_bytes_retain: u32 = 1024,
+    /// Default: 1MiB
+    retained_arena_bytes: u32 = 1024 * 1024,
     /// Amount of space on the `recv_buffer` retained
     /// after every send.
     ///
-    /// Default: 1KB
-    list_recv_bytes_retain: u32 = 1024,
+    /// Default: 1MiB
+    retained_recv_bytes: u32 = 1024 * 1024,
     /// Maximum size (in bytes) of the Recv buffer.
     /// This is mainly a concern when you are reading in
     /// large requests before responding.
     ///
     /// Default: 2MB
-    list_recv_bytes_max: u32 = 1024 * 1024 * 2,
+    max_recv_bytes: u32 = 1024 * 1024 * 2,
     /// Size of the buffer (in bytes) used for
     /// interacting with the socket.
     ///
-    /// Default: 1 KB
-    socket_buffer_bytes: u32 = 1024,
+    /// Default: 1 MiB
+    socket_buffer_bytes: u32 = 1024 * 1024,
     /// Maximum size (in bytes) of the Request.
     ///
     /// Default: 2MB
-    request_bytes_max: u32 = 1024 * 1024 * 2,
+    max_request_bytes: u32 = 1024 * 1024 * 2,
     /// Maximum size (in bytes) of the Request URI.
     ///
     /// Default: 2KB
-    request_uri_bytes_max: u32 = 1024 * 2,
+    max_request_uri_bytes: u32 = 1024 * 2,
 };
 
 const Request = union(enum) {
@@ -604,15 +604,6 @@ pub const Provision = struct {
     queries: string_map.AnyCase,
     request: http.Request,
     response: http.Response,
-};
-
-// TODO: find a find a more appropriate place for this
-pub const TLSFileOptions = union(enum) {
-    buffer: []const u8,
-    file: struct {
-        path: []const u8,
-        size_buffer_max: u32 = 1024 * 1024,
-    },
 };
 
 const log = std.log.scoped(.@"zzz/http/Server");

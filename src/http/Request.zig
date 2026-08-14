@@ -42,7 +42,7 @@ pub fn parse_headers(
     request: *Request,
     bytes: []const u8,
     options: ParseOptions,
-) http.Error!void {
+) (OoM || http.Error)!void {
     request.clear();
     var total_size: u32 = 0;
     var lines = mem.tokenizeAny(
@@ -299,6 +299,7 @@ const mem = std.mem;
 const fmt = std.fmt;
 const assert = std.debug.assert;
 const testing = std.testing;
+const OoM = mem.Allocator.Error;
 
 const zzz = @import("../root.zig");
 const string_map = zzz.core.string_map;

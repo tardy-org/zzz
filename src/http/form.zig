@@ -2,7 +2,7 @@
 pub fn Form(comptime T: type) type {
     return struct {
         pub fn parse(allocator: mem.Allocator, ctx: *const Context) !T {
-            var m: string_map.AnyCase = .init(ctx.allocator);
+            var m: string_map.AnyCase = .init(ctx.arena);
             defer {
                 var it = m.iterator();
                 while (it.next()) |entry| {

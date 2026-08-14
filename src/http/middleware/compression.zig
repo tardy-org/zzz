@@ -28,7 +28,7 @@ pub fn Compression(comptime compression: Kind) Middleware.Layer {
                     respond == .standard)
                 {
                     var compressed: std.Io.Writer.Allocating = try .initCapacity(
-                        next.context.allocator,
+                        next.context.arena,
                         // flate compress requires a buffer > 8
                         if (body.len < 9) body.len + 8 else body.len,
                     );

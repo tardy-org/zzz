@@ -45,8 +45,8 @@ pub fn main(init: std.process.Init) !void {
                 var server: http.Server = .init(.{
                     .stack_size = .@"64KiB",
                     .socket_buffer_bytes = 1024 * 2,
-                    .keepalive_count_max = null,
-                    .connection_count_max = 1024,
+                    .max_keepalive_count = null,
+                    .max_connection_count = 1024,
                 });
 
                 try server.serve(rt, p.router, p.tls);

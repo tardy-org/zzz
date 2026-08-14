@@ -13,7 +13,7 @@ pub fn init(ctx: *const http.Context) !SSE {
         .description = "SSE",
     };
 
-    var writer: Writer.Allocating = .init(ctx.allocator);
+    var writer: Writer.Allocating = .init(ctx.arena);
     errdefer writer.deinit();
 
     try ctx.response.headers_into_writer(
