@@ -1,6 +1,5 @@
 pub const Request = @This();
 
-allocator: mem.Allocator,
 method: ?http.Method = null,
 uri: ?[]const u8 = null,
 version: ?std.http.Version = .@"HTTP/1.1",
@@ -9,27 +8,21 @@ cookies: Cookie.Map,
 body: ?[]const u8 = null,
 
 /// This is for constructing a Request.
-pub fn init(allocator: mem.Allocator) Request {
-    const headers: string_map.AnyCase = .init(allocator);
-    const cookies: Cookie.Map = .init(allocator);
+pub const empty: Request = .{
+    .headers = .empty,
+    .cookies = .empty,
+};
 
-    return .{
-        .allocator = allocator,
-        .headers = headers,
-        .cookies = cookies,
-    };
+pub fn deinit(request: *Request, gpa: mem.Allocator) void {
+    request.cookies.deinit(gpa);
+    request.headers.deinit(gpa);
 }
 
-pub fn deinit(request: *Request) void {
-    request.cookies.deinit();
-    request.headers.deinit();
-}
-
-pub fn clear(request: *Request) void {
+pub fn clear(request: *Request, gpa: mem.Allocator) void {
     request.method = null;
     request.uri = null;
     request.body = null;
-    request.cookies.clear();
+    request.cookies.clear(gpa);
     request.headers.clearRetainingCapacity();
 }
 
@@ -51,9 +44,7 @@ pub fn parse_headers(
         "\r\n",
     );
 
-    if (lines.peek() == null) {
-        return error.MalformedRequest;
-    }
+    if (lines.peek() == null) return error.MalformedRequest;
 
     var parsing_first_line = true;
     while (lines.next()) |line| {

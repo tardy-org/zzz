@@ -85,30 +85,26 @@ pub fn to_string_alloc(cookie: Cookie, allocator: mem.Allocator) ![]const u8 {
 }
 
 pub const Map = struct {
-    allocator: mem.Allocator,
-    map: std.StringHashMap([]const u8),
+    map: array_hash_map.String([]const u8),
 
-    pub fn init(allocator: mem.Allocator) Map {
-        return .{
-            .allocator = allocator,
-            .map = .init(allocator),
-        };
-    }
+    pub const empty: Map = .{
+        .map = .empty,
+    };
 
-    pub fn deinit(map: *Map) void {
+    pub fn deinit(map: *Map, gpa: mem.Allocator) void {
         var iter = map.map.iterator();
         while (iter.next()) |entry| {
-            map.allocator.free(entry.key_ptr.*);
-            map.allocator.free(entry.value_ptr.*);
+            gpa.free(entry.key_ptr.*);
+            gpa.free(entry.value_ptr.*);
         }
-        map.map.deinit();
+        map.map.deinit(gpa);
     }
 
-    pub fn clear(map: *Map) void {
+    pub fn clear(map: *Map, gpa: mem.Allocator) void {
         var iter = map.map.iterator();
         while (iter.next()) |entry| {
-            map.allocator.free(entry.key_ptr.*);
-            map.allocator.free(entry.value_ptr.*);
+            gpa.free(entry.key_ptr.*);
+            gpa.free(entry.value_ptr.*);
         }
         map.map.clearRetainingCapacity();
     }
@@ -121,13 +117,17 @@ pub const Map = struct {
         return map.map.count();
     }
 
-    pub fn iterator(map: *const Map) std.StringHashMap([]const u8).Iterator {
+    pub fn iterator(map: *const Map) array_hash_map.String([]const u8).Iterator {
         return map.map.iterator();
     }
 
     // For parsing request cookies (simple key=value pairs)
-    pub fn parse_from_header(map: *Map, cookie_header: []const u8) !void {
-        map.clear();
+    pub fn parse_from_header(
+        map: *Map,
+        gpa: mem.Allocator,
+        cookie_header: []const u8,
+    ) !void {
+        map.clear(gpa);
 
         var pairs = mem.splitSequence(
             u8,
@@ -143,24 +143,28 @@ pub const Map = struct {
             const key = kv.next() orelse continue;
             const value = kv.rest();
 
-            const key_dup = try map.allocator.dupe(u8, key);
-            errdefer map.allocator.free(key_dup);
-            const value_dup = try map.allocator.dupe(u8, value);
-            errdefer map.allocator.free(value_dup);
+            const key_dup = try gpa.dupe(u8, key);
+            errdefer gpa.free(key_dup);
+            const value_dup = try gpa.dupe(u8, value);
+            errdefer gpa.free(value_dup);
 
             if (try map.map.fetchPut(key_dup, value_dup)) |existing| {
-                map.allocator.free(existing.key);
-                map.allocator.free(existing.value);
+                gpa.free(existing.key);
+                gpa.free(existing.value);
             }
         }
     }
 };
 
 test "Cookie: Header Parsing" {
-    var cookie_map: Cookie.Map = .init(testing.allocator);
-    defer cookie_map.deinit();
+    const gpa = testing.allocator;
+    var cookie_map: Cookie.Map = .empty;
+    defer cookie_map.deinit(gpa);
 
-    try cookie_map.parse_from_header("sessionId=abc123; java=slop; foo=bar=baz");
+    try cookie_map.parse_from_header(
+        gpa,
+        "sessionId=abc123; java=slop; foo=bar=baz",
+    );
     try testing.expectEqualStrings(
         "abc123",
         cookie_map.get("sessionId").?,
@@ -181,8 +185,9 @@ test "Cookie: Response Formatting" {
         .max_age = 3600,
     };
 
-    const formatted = try cookie.to_string_alloc(testing.allocator);
-    defer testing.allocator.free(formatted);
+    const gpa = testing.allocator;
+    const formatted = try cookie.to_string_alloc(gpa);
+    defer gpa.free(formatted);
 
     try testing.expectEqualStrings(
         "session=abc123; Domain=example.com; Path=/; Max-Age=3600; SameSite=Strict; Secure; HttpOnly",
@@ -191,6 +196,7 @@ test "Cookie: Response Formatting" {
 }
 
 const std = @import("std");
+const array_hash_map = std.array_hash_map;
 const mem = std.mem;
 const testing = std.testing;
 const Io = std.Io;

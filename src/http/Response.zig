@@ -14,21 +14,24 @@ pub const Fields = struct {
     headers: []const [2][]const u8 = &.{},
 };
 
-pub fn init(allocator: std.mem.Allocator) Response {
-    const headers: string_map.AnyCase = .init(allocator);
-    return .{ .headers = headers };
-}
+pub const empty: Response = .{
+    .headers = .empty,
+};
 
-pub fn deinit(response: *Response) void {
-    response.headers.deinit();
+pub fn deinit(response: *Response, gpa: mem.Allocator) void {
+    response.headers.deinit(gpa);
 }
 
 pub fn apply(response: *Response, into: Fields) !http.Respond {
+    const ctx: *http.Context = @fieldParentPtr(
+        "response",
+        response,
+    );
     response.status = into.status;
     response.mime = into.mime;
     response.body = into.body;
     for (into.headers) |pair|
-        try response.headers.put(pair[0], pair[1]);
+        try response.headers.put(ctx.arena, pair[0], pair[1]);
     return .standard;
 }
 
@@ -75,7 +78,7 @@ pub fn headers_into_writer(
 }
 
 const std = @import("std");
-const assert = std.debug.assert;
+const mem = std.mem;
 const Io = std.Io;
 
 const zzz = @import("../root.zig");

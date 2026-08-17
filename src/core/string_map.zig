@@ -1,31 +1,29 @@
-const Context = struct {
-    pub fn hash(_: Context, key: []const u8) u64 {
-        var wyhash: std.hash.Wyhash = .init(0);
-        for (key) |b| wyhash.update(&.{std.ascii.toLower(b)});
-        return wyhash.final();
-    }
-
-    pub fn eql(_: Context, key1: []const u8, key2: []const u8) bool {
-        if (key1.len != key2.len) return false;
-        for (key1, key2) |b1, b2|
-            if (std.ascii.toLower(b1) != std.ascii.toLower(b2)) return false;
-        return true;
-    }
-};
-
-pub const AnyCase = std.hash_map.HashMap(
+pub const AnyCase = array_hash_map.Custom(
     []const u8,
     []const u8,
     Context,
-    80,
+    true,
 );
 
-test "string_map.AnyCase: Add Stuff" {
-    var map: AnyCase = .init(testing.allocator);
-    defer map.deinit();
+const Context = struct {
+    pub fn hash(_: Context, key: []const u8) u32 {
+        var wyhash: std.hash.XxHash3 = .init(0);
+        for (key) |byte| wyhash.update(&.{ascii.toLower(byte)});
+        return @truncate(wyhash.final());
+    }
 
-    try map.put("Content-Length", "100");
-    try map.put("Host", "localhost:9999");
+    pub fn eql(_: Context, key_a: []const u8, key_b: []const u8, _: usize) bool {
+        return ascii.eqlIgnoreCase(key_a, key_b);
+    }
+};
+
+test "string_map.AnyCase: Add Stuff" {
+    const gpa = testing.allocator;
+    var map: AnyCase = .empty;
+    defer map.deinit(gpa);
+
+    try map.put(gpa, "Content-Length", "100");
+    try map.put(gpa, "Host", "localhost:9999");
 
     const content_length = map.get("Content-length");
     try testing.expect(content_length != null);
@@ -35,4 +33,6 @@ test "string_map.AnyCase: Add Stuff" {
 }
 
 const std = @import("std");
+const array_hash_map = std.array_hash_map;
+const ascii = std.ascii;
 const testing = std.testing;
