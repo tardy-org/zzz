@@ -38,7 +38,9 @@ pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
                     }
                 }
 
-                const r: *Route = if (current.route) |*inner| inner else blk: {
+                const r: *Route = if (current.route) |*current_route|
+                    current_route
+                else blk: {
                     current.route = route;
                     break :blk &current.route.?;
                 };
@@ -91,9 +93,9 @@ pub fn get_bundle(
             const child = entry.value_ptr.*;
 
             switch (token) {
-                .fragment => |inner| if (mem.eql(
+                .fragment => |fragment| if (mem.eql(
                     u8,
-                    inner,
+                    fragment,
                     chunk,
                 )) {
                     current = child;
@@ -217,8 +219,8 @@ fn TokenHashMap(comptime V: type) type {
         pub fn hash(_: TokenHashMap_t, input: Token) u64 {
             const bytes: []const u8 = blk: {
                 switch (input) {
-                    .fragment => |inner| break :blk inner,
-                    .match => |inner| break :blk @tagName(inner),
+                    .fragment => |fragment| break :blk fragment,
+                    .match => |match| break :blk @tagName(match),
                 }
             };
 
@@ -228,19 +230,19 @@ fn TokenHashMap(comptime V: type) type {
         pub fn eql(_: TokenHashMap_t, first: Token, second: Token) bool {
             const result = blk: {
                 switch (first) {
-                    .fragment => |f_inner| {
+                    .fragment => |fragment_1| {
                         switch (second) {
-                            .fragment => |s_inner| break :blk mem.eql(
+                            .fragment => |fragment_2| break :blk mem.eql(
                                 u8,
-                                f_inner,
-                                s_inner,
+                                fragment_1,
+                                fragment_2,
                             ),
                             else => break :blk false,
                         }
                     },
-                    .match => |f_inner| {
+                    .match => |match_1| {
                         switch (second) {
-                            .match => |s_inner| break :blk f_inner == s_inner,
+                            .match => |match_2| break :blk match_1 == match_2,
                             else => break :blk false,
                         }
                     },

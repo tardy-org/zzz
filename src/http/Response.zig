@@ -62,7 +62,7 @@ pub fn headers_into_writer(
     // Content-Type
     const mime = response.mime.?;
     const content_type = switch (mime.content_type) {
-        .single => |inner| inner,
+        .single => |single| single,
         .multiple => |content_types| content_types[0],
     };
     try writer.print("Content-Type: {s}\r\n", .{content_type});

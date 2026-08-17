@@ -5,7 +5,7 @@
 pub fn RateLimiting(config: *Config) Middleware.Layer {
     const func: Middleware.TypedFn(*Config) = struct {
         fn rate_limit_mw(next: *Middleware.Next, c: *Config) !http.Respond {
-            const ip = get_ip(next.context.tls.inner.addr);
+            const ip = next.context.tls.info().address;
             const time = std.time.milliTimestamp();
 
             c.mutex.lock();
@@ -98,14 +98,6 @@ const Bucket = struct {
         return false;
     }
 };
-
-fn get_ip(addr: std.net.Address) u128 {
-    return switch (addr.any.family) {
-        std.posix.AF.INET => @intCast(addr.in.sa.addr),
-        std.posix.AF.INET6 => mem.bytesAsValue(u128, &addr.in6.sa.addr[0]).*,
-        else => @panic("Not an IP address."),
-    };
-}
 
 const std = @import("std");
 const mem = std.mem;

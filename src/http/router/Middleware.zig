@@ -1,10 +1,10 @@
 pub const Middleware = @This();
 
-inner: WithData,
+data: WithData,
 
 pub fn init(args: anytype, func: TypedFn(@TypeOf(args))) Middleware {
     return .{
-        .inner = .{
+        .data = .{
             .func = @ptrCast(func),
             .args = .init(args),
         },
@@ -12,7 +12,7 @@ pub fn init(args: anytype, func: TypedFn(@TypeOf(args))) Middleware {
 }
 
 pub fn layer(middleware: Middleware) Layer {
-    return .{ .middleware = middleware.inner };
+    return .{ .middleware = middleware.data };
 }
 
 pub const Layer = union(enum) {

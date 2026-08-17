@@ -54,7 +54,7 @@ pub fn layer(route: Route) Middleware.Layer {
 }
 
 /// Set a handler function for the provided method.
-inline fn inner_route(
+inline fn create(
     route: Route,
     comptime method: http.Method,
     args: anytype,
@@ -106,7 +106,7 @@ pub fn get(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.GET, args, handler_fn);
+    return route.create(.GET, args, handler_fn);
 }
 
 pub fn head(
@@ -114,7 +114,7 @@ pub fn head(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.HEAD, args, handler_fn);
+    return route.create(.HEAD, args, handler_fn);
 }
 
 pub fn post(
@@ -122,7 +122,7 @@ pub fn post(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.POST, args, handler_fn);
+    return route.create(.POST, args, handler_fn);
 }
 
 pub fn put(
@@ -130,7 +130,7 @@ pub fn put(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.PUT, args, handler_fn);
+    return route.create(.PUT, args, handler_fn);
 }
 
 pub fn delete(
@@ -138,7 +138,7 @@ pub fn delete(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.DELETE, args, handler_fn);
+    return route.create(.DELETE, args, handler_fn);
 }
 
 pub fn connect(
@@ -146,7 +146,7 @@ pub fn connect(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.CONNECT, args, handler_fn);
+    return route.create(.CONNECT, args, handler_fn);
 }
 
 pub fn options(
@@ -154,7 +154,7 @@ pub fn options(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.OPTIONS, args, handler_fn);
+    return route.create(.OPTIONS, args, handler_fn);
 }
 
 pub fn trace(
@@ -162,7 +162,7 @@ pub fn trace(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.TRACE, args, handler_fn);
+    return route.create(.TRACE, args, handler_fn);
 }
 
 pub fn patch(
@@ -170,7 +170,7 @@ pub fn patch(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.PATCH, args, handler_fn);
+    return route.create(.PATCH, args, handler_fn);
 }
 
 /// Define a GET handler to serve an embedded file.

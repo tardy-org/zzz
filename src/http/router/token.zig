@@ -49,9 +49,9 @@ test "Chunk Parsing (Fragment)" {
     const token: Token = .parse_chunk(chunk);
 
     switch (token) {
-        .fragment => |inner| try testing.expectEqualStrings(
+        .fragment => |fragment| try testing.expectEqualStrings(
             chunk,
-            inner,
+            fragment,
         ),
         .match => return error.IncorrectTokenParsing,
     }
@@ -79,9 +79,9 @@ test "Chunk Parsing (Match)" {
 
         switch (token) {
             .fragment => return error.IncorrectTokenParsing,
-            .match => |inner| try testing.expectEqual(
+            .match => |actual_match| try testing.expectEqual(
                 match,
-                inner,
+                actual_match,
             ),
         }
     }
@@ -101,13 +101,13 @@ test "Path Parsing (Mixed)" {
     for (parsed) |expected| {
         const token: Token = .parse_chunk(iter.next().?);
         switch (token) {
-            .fragment => |inner| try testing.expectEqualStrings(
+            .fragment => |fragment| try testing.expectEqualStrings(
                 expected.fragment,
-                inner,
+                fragment,
             ),
-            .match => |inner| try testing.expectEqual(
+            .match => |match| try testing.expectEqual(
                 expected.match,
-                inner,
+                match,
             ),
         }
     }
