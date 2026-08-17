@@ -38,13 +38,9 @@ pub fn serve(
     errdefer rt.gpa.destroy(accept_queued);
     accept_queued.* = true;
 
-    // Use a Max Header Size of 8KiB same as Nginx, Tomcat and Httpd but
-    // consider making this configurable
-    // https://stackoverflow.com/questions/686217/maximum-on-http-header-values
-    const max_http_header_size = 1024 * 8;
     const pool_header_buffer: []u8 = try rt.gpa.alloc(
         u8,
-        count * max_http_header_size,
+        count * server.config.max_http_header_size,
     );
     errdefer rt.gpa.free(pool_header_buffer);
     var next_header_buffer_index: usize = 0;
@@ -519,6 +515,10 @@ pub const Config = struct {
     ///
     /// Default: 1MB
     stack_size: Coroutine.Stack = .@"1MiB",
+    /// Use a Max Header Size of 8KiB same as Nginx, Tomcat and Httpd but
+    /// consider making this configurable
+    /// https://stackoverflow.com/questions/686217/maximum-on-http-header-values
+    max_http_header_size: u32 = 1024 * 8,
     /// Number of Maximum Concurrent Connections.
     ///
     /// This is applied PER runtime.
