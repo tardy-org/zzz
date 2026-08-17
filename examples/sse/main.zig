@@ -58,7 +58,7 @@ pub fn main(init: std.process.Init) !void {
             fn entry(rt: *Runtime, p: EntryParams) !void {
                 const server: http.Server = .init(.{
                     .stack_size = .@"2MiB",
-                    .socket_buffer_bytes = 1024 * 2,
+                    .socket_buffer_size = .@"2KiB",
                 });
 
                 try server.serve(rt, p.router, p.tls);

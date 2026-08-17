@@ -62,7 +62,7 @@ pub fn main(init: std.process.Init) !void {
             fn entry(rt: *tardy.Runtime, p: EntryParams) !void {
                 var server: http.Server = .init(.{
                     .stack_size = .@"2MiB",
-                    .socket_buffer_bytes = 1024 * 4,
+                    .socket_buffer_size = .@"4KiB",
                 });
 
                 try server.serve(rt, p.router, p.tls);

@@ -34,8 +34,8 @@ pub fn clear(request: *Request) void {
 }
 
 const ParseOptions = struct {
-    max_request_bytes: u32,
-    max_uri_bytes: u32,
+    max_request_bytes: core.Size,
+    max_uri_bytes: core.Size,
 };
 
 pub fn parse_headers(
@@ -59,9 +59,7 @@ pub fn parse_headers(
     while (lines.next()) |line| {
         total_size += @intCast(line.len);
 
-        if (total_size > options.max_request_bytes) {
-            return error.ContentTooLarge;
-        }
+        if (total_size > options.max_request_bytes.Usize()) return error.ContentTooLarge;
 
         if (parsing_first_line) {
             var chunks = mem.tokenizeScalar(
@@ -79,7 +77,7 @@ pub fn parse_headers(
 
             const uri_string = chunks.next() orelse
                 return error.MalformedRequest;
-            if (uri_string.len >= options.max_uri_bytes)
+            if (uri_string.len >= options.max_uri_bytes.Usize())
                 return error.URITooLong;
             if (uri_string[0] != '/') return error.MalformedRequest;
 
@@ -154,8 +152,8 @@ test "Parse Request" {
     defer request.deinit();
 
     try request.parse_headers(request_text[0..], .{
-        .max_request_bytes = 1024,
-        .max_uri_bytes = 256,
+        .max_request_bytes = .KiB(1),
+        .max_uri_bytes = .Bytes(256),
     });
 
     try testing.expectEqual(.GET, request.method);
@@ -194,7 +192,10 @@ test "Expect ContentTooLong Error" {
 
     const err = request.parse_headers(
         request_text[0..],
-        .{ .max_request_bytes = 128, .max_uri_bytes = 64 },
+        .{
+            .max_request_bytes = .Bytes(128),
+            .max_uri_bytes = .Bytes(64),
+        },
     );
     try testing.expectError(
         error.ContentTooLarge,
@@ -220,7 +221,10 @@ test "Expect URITooLong Error" {
 
     const err = request.parse_headers(
         request_text[0..],
-        .{ .max_request_bytes = 1024 * 1024, .max_uri_bytes = 2048 },
+        .{
+            .max_request_bytes = .@"1MiB",
+            .max_uri_bytes = .@"2KiB",
+        },
     );
     try testing.expectError(error.URITooLong, err);
 }
@@ -242,7 +246,10 @@ test "Expect Malformed when URI missing /" {
 
     const err = request.parse_headers(
         request_text[0..],
-        .{ .max_request_bytes = 1024, .max_uri_bytes = 512 },
+        .{
+            .max_request_bytes = .KiB(1),
+            .max_uri_bytes = .Bytes(512),
+        },
     );
     try testing.expectError(
         error.MalformedRequest,
@@ -263,7 +270,10 @@ test "Expect Incorrect HTTP Version" {
 
     const err = request.parse_headers(
         request_text[0..],
-        .{ .max_request_bytes = 1024, .max_uri_bytes = 512 },
+        .{
+            .max_request_bytes = .KiB(1),
+            .max_uri_bytes = .Bytes(512),
+        },
     );
     try testing.expectError(
         error.HTTPVersionNotSupported,
@@ -284,7 +294,10 @@ test "Malformed string_map.AnyCase" {
 
     const err = request.parse_headers(
         request_text[0..],
-        .{ .max_request_bytes = 1024, .max_uri_bytes = 512 },
+        .{
+            .max_request_bytes = .KiB(1),
+            .max_uri_bytes = .Bytes(512),
+        },
     );
     try testing.expectError(
         error.MalformedRequest,
@@ -302,6 +315,7 @@ const testing = std.testing;
 const OoM = mem.Allocator.Error;
 
 const zzz = @import("../root.zig");
-const string_map = zzz.core.string_map;
+const core = zzz.core;
+const string_map = core.string_map;
 const http = zzz.http;
 const Cookie = @import("Cookie.zig");

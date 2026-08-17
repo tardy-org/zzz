@@ -40,7 +40,7 @@ pub fn serve(
 
     const pool_header_buffer: []u8 = try rt.gpa.alloc(
         u8,
-        count * server.config.max_http_header_size,
+        count * server.config.max_http_header_size.Usize(),
     );
     errdefer rt.gpa.free(pool_header_buffer);
     var next_header_buffer_index: usize = 0;
@@ -50,13 +50,13 @@ pub fn serve(
         provision.initalized = true;
         provision.zc_recv_buffer = ZeroCopy(u8).init(
             rt.gpa,
-            server.config.socket_buffer_bytes,
+            server.config.socket_buffer_size.Usize(),
         ) catch @panic("ZeroCopy OOM");
 
         provision.header_writer = .fixed(
-            pool_header_buffer[next_header_buffer_index..][0..max_http_header_size],
+            pool_header_buffer[next_header_buffer_index..][0..server.config.max_http_header_size.Usize()],
         );
-        next_header_buffer_index += max_http_header_size;
+        next_header_buffer_index += server.config.max_http_header_size.Usize();
 
         provision.arena = .init(rt.gpa);
         provision.captures = rt.gpa.alloc(
@@ -150,7 +150,7 @@ pub fn mainLoop(
         log.debug("initalizing new provision", .{});
         provision.zc_recv_buffer = ZeroCopy(u8).init(
             rt.gpa,
-            config.socket_buffer_bytes,
+            config.socket_buffer_size.Usize(),
         ) catch @panic("ZeroCopy OOM");
 
         provision.arena = .init(rt.gpa);
@@ -180,7 +180,7 @@ pub fn mainLoop(
 
     provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
         rt.gpa,
-        config.socket_buffer_bytes,
+        config.socket_buffer_size.Usize(),
     );
 
     var keepalive_count: u16 = 0;
@@ -206,9 +206,10 @@ pub fn mainLoop(
                 provision.zc_recv_buffer.mark_written(recv_count);
                 provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
                     rt.gpa,
-                    config.socket_buffer_bytes,
+                    config.socket_buffer_size.Usize(),
                 );
-                if (provision.zc_recv_buffer.len > config.max_request_bytes) break;
+                if (provision.zc_recv_buffer.len > config.max_request_size.Usize())
+                    break;
 
                 const search_area_start =
                     (provision.zc_recv_buffer.len - recv_count) -| 4;
@@ -228,8 +229,8 @@ pub fn mainLoop(
                             .{ .end = real_header_end },
                         ),
                         .{
-                            .max_request_bytes = config.max_request_bytes,
-                            .max_uri_bytes = config.max_request_uri_bytes,
+                            .max_request_bytes = config.max_request_size,
+                            .max_uri_bytes = config.max_request_uri_size,
                         },
                     );
 
@@ -292,9 +293,10 @@ pub fn mainLoop(
                 provision.zc_recv_buffer.mark_written(recv_count);
                 provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
                     rt.gpa,
-                    config.socket_buffer_bytes,
+                    config.socket_buffer_size.Usize(),
                 );
-                if (provision.zc_recv_buffer.len > config.max_request_bytes) break;
+                if (provision.zc_recv_buffer.len > config.max_request_size.Usize())
+                    break;
 
                 info.current_length += recv_count;
                 debug.assert(info.current_length <= info.content_length);
@@ -489,11 +491,11 @@ fn prepare_new_request(
     provision.zc_recv_buffer.clear_retaining_capacity();
     _ = provision.header_writer.consumeAll();
     _ = provision.arena.reset(.{
-        .retain_with_limit = config.retained_arena_bytes,
+        .retain_with_limit = config.retained_arena_bytes.Usize(),
     });
     provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
         allocator,
-        config.socket_buffer_bytes,
+        config.socket_buffer_size.Usize(),
     );
 
     if (state) |s| s.* = .{ .request = .header };
@@ -518,7 +520,16 @@ pub const Config = struct {
     /// Use a Max Header Size of 8KiB same as Nginx, Tomcat and Httpd but
     /// consider making this configurable
     /// https://stackoverflow.com/questions/686217/maximum-on-http-header-values
-    max_http_header_size: u32 = 1024 * 8,
+    /// Default: 8KiB
+    max_http_header_size: zcore.Size = .@"8KiB",
+    /// Maximum size (in bytes) of the Request.
+    ///
+    /// Default: 2MiB
+    max_request_size: zcore.Size = .@"2MiB",
+    /// Maximum size (in bytes) of the Request URI.
+    ///
+    /// Default: 2KiB
+    max_request_uri_size: zcore.Size = .@"2KiB",
     /// Number of Maximum Concurrent Connections.
     ///
     /// This is applied PER runtime.
@@ -549,31 +560,23 @@ pub const Config = struct {
     /// will make allocators slower.
     ///
     /// Default: 1MiB
-    retained_arena_bytes: u32 = 1024 * 1024,
+    retained_arena_bytes: zcore.Size = .@"1MiB",
     /// Amount of space on the `recv_buffer` retained
     /// after every send.
     ///
     /// Default: 1MiB
-    retained_recv_bytes: u32 = 1024 * 1024,
+    retained_recv_bytes: zcore.Size = .@"1MiB",
     /// Maximum size (in bytes) of the Recv buffer.
     /// This is mainly a concern when you are reading in
     /// large requests before responding.
     ///
-    /// Default: 2MB
-    max_recv_bytes: u32 = 1024 * 1024 * 2,
+    /// Default: 2MiB
+    max_recv_buffer_size: zcore.Size = .@"2MiB",
     /// Size of the buffer (in bytes) used for
     /// interacting with the socket.
     ///
     /// Default: 1 MiB
-    socket_buffer_bytes: u32 = 1024 * 1024,
-    /// Maximum size (in bytes) of the Request.
-    ///
-    /// Default: 2MB
-    max_request_bytes: u32 = 1024 * 1024 * 2,
-    /// Maximum size (in bytes) of the Request URI.
-    ///
-    /// Default: 2KB
-    max_request_uri_bytes: u32 = 1024 * 2,
+    socket_buffer_size: zcore.Size = .@"1MiB",
 };
 
 const Request = union(enum) {
