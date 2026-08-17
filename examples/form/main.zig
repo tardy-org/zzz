@@ -34,13 +34,12 @@ const UserInfo = struct {
 
 fn generate(ctx: *const http.Context, _: void) !http.Respond {
     const info = switch (ctx.request.method.?) {
-        .GET => try form.Query(UserInfo).parse(ctx.allocator, ctx),
-        .POST => try form.Form(UserInfo).parse(ctx.allocator, ctx),
+        .GET => try form.Query(UserInfo).parse(ctx.arena, ctx),
+        .POST => try form.Form(UserInfo).parse(ctx.arena, ctx),
         else => return error.UnexpectedMethod,
     };
 
-    const body = try std.fmt.allocPrint(
-        ctx.allocator,
+    const body = try ctx.arena.print(
         "First: {s} | Middle: {s} | Last: {s} | Age: {d} | Height: {d} | Weight: {s}",
         .{
             info.fname,

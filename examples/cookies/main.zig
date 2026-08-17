@@ -14,7 +14,7 @@ fn hello_world(ctx: *const http.Context, _: void) !http.Respond {
         .mime = .HTML,
         .body = "Hello, world!",
         .headers = &.{
-            .{ "Set-Cookie", try cookie.to_string_alloc(ctx.allocator) },
+            .{ "Set-Cookie", try cookie.to_string_alloc(ctx.arena) },
         },
     });
 }

@@ -61,8 +61,7 @@ fn root_handler(ctx: *const http.Context, id: i8) !http.Respond {
         \\ </body>
         \\ </html>
     ;
-    const body = try std.fmt.allocPrint(
-        ctx.allocator,
+    const body = try ctx.arena.print(
         body_fmt,
         .{ id, ctx.storage.get(usize).? },
     );
