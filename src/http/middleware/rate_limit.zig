@@ -66,8 +66,8 @@ pub const Config = struct {
         };
     }
 
-    pub fn deinit(self: *Config) void {
-        self.map.deinit();
+    pub fn deinit(config: *Config) void {
+        config.map.deinit();
     }
 };
 
@@ -75,11 +75,18 @@ const Bucket = struct {
     tokens: u16,
     last_refill_ms: i64,
 
-    pub fn replenish(self: *Bucket, time_ms: i64, tokens_per_sec: u16, max_tokens: u16) void {
-        const delta_ms = time_ms - self.last_refill_ms;
-        const new_tokens: u16 = @intCast(@divFloor(delta_ms * tokens_per_sec, std.time.ms_per_s));
-        self.tokens = @min(max_tokens, self.tokens + new_tokens);
-        self.last_refill_ms = time_ms;
+    pub fn replenish(
+        bucket: *Bucket,
+        time_ms: i64,
+        tokens_per_sec: u16,
+        max_tokens: u16,
+    ) void {
+        const delta_ms = time_ms - bucket.last_refill_ms;
+        const new_tokens: u16 = @intCast(
+            @divFloor(delta_ms * tokens_per_sec, std.time.ms_per_s),
+        );
+        bucket.tokens = @min(max_tokens, bucket.tokens + new_tokens);
+        bucket.last_refill_ms = time_ms;
     }
 
     pub fn take(self: *Bucket) bool {

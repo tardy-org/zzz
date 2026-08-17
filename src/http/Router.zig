@@ -15,12 +15,12 @@ pub fn init(
     };
 }
 
-pub fn deinit(self: *Router, allocator: mem.Allocator) void {
-    self.routes.deinit(allocator);
+pub fn deinit(router: *Router, allocator: mem.Allocator) void {
+    router.routes.deinit(allocator);
 }
 
 pub fn get_bundle_from_host(
-    self: *const Router,
+    router: *const Router,
     allocator: mem.Allocator,
     path: []const u8,
     captures: []Trie.Capture,
@@ -28,7 +28,7 @@ pub fn get_bundle_from_host(
 ) !Trie.Bundle {
     queries.clearRetainingCapacity();
 
-    return try self.routes.get_bundle(
+    return try router.routes.get_bundle(
         allocator,
         path,
         captures,
@@ -36,7 +36,7 @@ pub fn get_bundle_from_host(
     ) orelse .{
         .route = Route.init("").all(
             {},
-            self.configuration.not_found,
+            router.configuration.not_found,
         ),
         .captures = captures[0..],
         .queries = queries,

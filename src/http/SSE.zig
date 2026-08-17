@@ -32,8 +32,8 @@ pub fn init(ctx: *const http.Context) !SSE {
     };
 }
 
-pub fn send(self: *SSE, message: Message) !void {
-    var aw = &self.writer;
+pub fn send(sse: *SSE, message: Message) !void {
+    var aw = &sse.writer;
     defer aw.clearRetainingCapacity(); // reuse the writer
     const writer = &aw.writer;
 
@@ -55,7 +55,7 @@ pub fn send(self: *SSE, message: Message) !void {
     try writer.writeByte('\n');
 
     const written = aw.written();
-    const sent = try self.tls.send_all(self.runtime, written);
+    const sent = try sse.tls.send_all(sse.runtime, written);
     if (sent != written.len) return error.Closed;
 }
 

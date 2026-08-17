@@ -5,7 +5,7 @@ middlewares: std.ArrayList(Middleware.WithData),
 
 /// Initialize the routing tree with the given routes.
 pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
-    var self: Trie = .{
+    var trie: Trie = .{
         .root = .init(
             allocator,
             .{ .fragment = "" },
@@ -17,7 +17,7 @@ pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
     for (layers) |layer| {
         switch (layer) {
             .route => |route| {
-                var current = &self.root;
+                var current = &trie.root;
                 var iter = mem.tokenizeScalar(
                     u8,
                     route.path,
@@ -43,28 +43,32 @@ pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
                     break :blk &current.route.?;
                 };
 
-                for (route.handlers, 0..) |handler, i| if (handler) |h| {
-                    r.handlers[i] = .{
-                        .handler_fn = h.handler_fn,
-                        .middlewares = self.middlewares.items,
-                        .args = h.args,
+                for (route.handlers, 0..) |handler, i|
+                    if (handler) |h| {
+                        r.handlers[i] = .{
+                            .handler_fn = h.handler_fn,
+                            .middlewares = trie.middlewares.items,
+                            .args = h.args,
+                        };
                     };
-                };
             },
-            .middleware => |mw| try self.middlewares.append(allocator, mw),
+            .middleware => |mw| try trie.middlewares.append(
+                allocator,
+                mw,
+            ),
         }
     }
 
-    return self;
+    return trie;
 }
 
-pub fn deinit(self: *Trie, allocator: mem.Allocator) void {
-    self.root.deinit();
-    self.middlewares.deinit(allocator);
+pub fn deinit(trie: *Trie, allocator: mem.Allocator) void {
+    trie.root.deinit();
+    trie.middlewares.deinit(allocator);
 }
 
 pub fn get_bundle(
-    self: Trie,
+    trie: Trie,
     allocator: mem.Allocator,
     path: []const u8,
     captures: []Capture,
@@ -78,7 +82,7 @@ pub fn get_bundle(
         '/',
     );
 
-    var current = self.root;
+    var current = trie.root;
 
     slash_loop: while (iter.next()) |chunk| {
         var child_iter = current.children.iterator();
@@ -129,7 +133,8 @@ pub fn get_bundle(
                             .string = chunk,
                         },
                         .remaining => {
-                            const rest = iter.buffer[(iter.index - chunk.len)..];
+                            const rest =
+                                iter.buffer[(iter.index - chunk.len)..];
                             captures[capture_idx] = .{
                                 .remaining = rest,
                             };
@@ -208,9 +213,8 @@ pub fn get_bundle(
 fn TokenHashMap(comptime V: type) type {
     // TODO: use unmanaged variants
     return std.HashMap(Token, V, struct {
-        pub fn hash(self: @This(), input: Token) u64 {
-            _ = self;
-
+        const TokenHashMap_t = @This();
+        pub fn hash(_: TokenHashMap_t, input: Token) u64 {
             const bytes: []const u8 = blk: {
                 switch (input) {
                     .fragment => |inner| break :blk inner,
@@ -218,12 +222,10 @@ fn TokenHashMap(comptime V: type) type {
                 }
             };
 
-            return std.hash.Wyhash.hash(0, bytes);
+            return Wyhash.hash(0, bytes);
         }
 
-        pub fn eql(self: @This(), first: Token, second: Token) bool {
-            _ = self;
-
+        pub fn eql(_: TokenHashMap_t, first: Token, second: Token) bool {
             const result = blk: {
                 switch (first) {
                     .fragment => |f_inner| {
@@ -265,16 +267,17 @@ pub const Node = struct {
         };
     }
 
-    pub fn deinit(self: *Node) void {
-        var iter = self.children.valueIterator();
+    pub fn deinit(node: *Node) void {
+        var iter = node.children.valueIterator();
 
-        while (iter.next()) |node| {
-            node.deinit();
+        while (iter.next()) |next_node| {
+            next_node.deinit();
         }
 
-        self.children.deinit();
+        node.children.deinit();
     }
 };
+
 /// Structure of a matched route.
 pub const Bundle = struct {
     route: Route,
@@ -564,6 +567,7 @@ test "Routing with Queries" {
 }
 
 const std = @import("std");
+const Wyhash = std.hash.Wyhash;
 const mem = std.mem;
 const fmt = std.fmt;
 const debug = std.debug;

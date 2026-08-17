@@ -11,8 +11,8 @@ pub fn init(args: anytype, func: TypedFn(@TypeOf(args))) Middleware {
     };
 }
 
-pub fn layer(self: Middleware) Layer {
-    return .{ .middleware = self.inner };
+pub fn layer(middleware: Middleware) Layer {
+    return .{ .middleware = middleware.inner };
 }
 
 pub const Layer = union(enum) {
@@ -27,12 +27,12 @@ pub const Next = struct {
     middlewares: []const WithData,
     handler: Route.Handler.WithData,
 
-    pub fn run(self: *Next) !Respond {
-        if (self.middlewares.len > 0) {
-            const middleware = self.middlewares[0];
-            self.middlewares = self.middlewares[1..];
-            return try middleware.func(self, middleware.args);
-        } else return try self.handler.handler_fn(self.context, self.handler.args);
+    pub fn run(next: *Next) !Respond {
+        if (next.middlewares.len > 0) {
+            const middleware = next.middlewares[0];
+            next.middlewares = next.middlewares[1..];
+            return try middleware.func(next, middleware.args);
+        } else return try next.handler.handler_fn(next.context, next.handler.args);
     }
 };
 
