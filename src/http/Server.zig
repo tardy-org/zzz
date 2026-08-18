@@ -327,7 +327,7 @@ pub fn mainLoop(
                 continue;
             };
 
-            const context: http.Context = .{
+            const ctx: http.Context = .{
                 .runtime = rt,
                 .arena = provision.arena.allocator(),
                 .header_writer = &provision.header_writer,
@@ -340,7 +340,7 @@ pub fn mainLoop(
             };
 
             var next: Middleware.Next = .{
-                .context = &context,
+                .ctx = &ctx,
                 .middlewares = h_with_data.middlewares,
                 .handler = h_with_data,
             };

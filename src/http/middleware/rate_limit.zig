@@ -5,7 +5,7 @@
 pub fn RateLimiting(config: *Config) Middleware.Layer {
     const func: Middleware.TypedFn(*Config) = struct {
         fn rate_limit_mw(next: *Middleware.Next, c: *Config) !http.Respond {
-            const ip = next.context.tls.info().address;
+            const ip = next.ctx.tls.info().address;
             const time = std.time.milliTimestamp();
 
             c.mutex.lock();

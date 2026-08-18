@@ -57,7 +57,7 @@ fn fs_dir_handler(ctx: *const http.Context, dir: fs.Dir) !http.Respond {
         "\"{d}\"",
         .{etag_hash},
     );
-    try response.headers.put("ETag", calc_etag);
+    try response.headers.put(ctx.arena, "ETag", calc_etag);
 
     // If we have an ETag on the request...
     if (ctx.request.headers.get("If-None-Match")) |etag| {

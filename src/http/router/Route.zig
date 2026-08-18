@@ -185,22 +185,30 @@ pub fn embed_file(
             const cache_control: []const u8 = if (comptime builtin.mode == .debug)
                 "no-cache"
             else
-                comptime std.fmt.comptimePrint(
+                comptime fmt.comptimePrint(
                     "max-age={d}",
                     .{std.time.s_per_day * 30},
                 );
 
-            try response.headers.put("Cache-Control", cache_control);
+            try response.headers.put(
+                ctx.arena,
+                "Cache-Control",
+                cache_control,
+            );
 
             // If our static item is greater than 1KB,
             // it might be more beneficial to using caching.
             if (comptime bytes.len > 1024) {
                 @setEvalBranchQuota(1_000_000);
-                const etag = comptime std.fmt.comptimePrint(
+                const etag = comptime fmt.comptimePrint(
                     "\"{d}\"",
                     .{std.hash.Wyhash.hash(0, bytes)},
                 );
-                try response.headers.put("ETag", etag[0..]);
+                try response.headers.put(
+                    ctx.arena,
+                    "ETag",
+                    etag[0..],
+                );
 
                 if (ctx.request.headers.get("If-None-Match")) |match| {
                     if (mem.eql(u8, etag, match)) {
@@ -213,9 +221,11 @@ pub fn embed_file(
             }
 
             if (opts.compression) |compression|
-                try response.headers.put("Content-Encoding", @tagName(
-                    compression,
-                ));
+                try response.headers.put(
+                    ctx.arena,
+                    "Content-Encoding",
+                    @tagName(compression),
+                );
 
             return response.apply(.{
                 .status = .OK,
@@ -253,6 +263,7 @@ const log = std.log.scoped(.@"zzz/http/route");
 
 const std = @import("std");
 const mem = std.mem;
+const fmt = std.fmt;
 const meta = std.meta;
 const assert = std.debug.assert;
 const builtin = @import("builtin");

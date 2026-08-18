@@ -77,13 +77,13 @@ fn root_handler(ctx: *const http.Context, id: i8) !http.Respond {
 }
 
 fn passing_middleware(next: *Middleware.Next, _: void) !http.Respond {
-    log.info("pass middleware: {s}", .{next.context.request.uri.?});
-    try next.context.storage.put(usize, 100);
+    log.info("pass middleware: {s}", .{next.ctx.request.uri.?});
+    try next.ctx.storage.put(next.ctx.arena, usize, 100);
     return try next.run();
 }
 
 fn failing_middleware(next: *Middleware.Next, _: void) !http.Respond {
-    log.info("fail middleware: {s}", .{next.context.request.uri.?});
+    log.info("fail middleware: {s}", .{next.ctx.request.uri.?});
     return error.FailingMiddleware;
 }
 

@@ -23,7 +23,7 @@ pub const Layer = union(enum) {
 };
 
 pub const Next = struct {
-    context: *const http.Context,
+    ctx: *const http.Context,
     middlewares: []const WithData,
     handler: Route.Handler.WithData,
 
@@ -32,7 +32,7 @@ pub const Next = struct {
             const middleware = next.middlewares[0];
             next.middlewares = next.middlewares[1..];
             return try middleware.func(next, middleware.args);
-        } else return try next.handler.handler_fn(next.context, next.handler.args);
+        } else return try next.handler.handler_fn(next.ctx, next.handler.args);
     }
 };
 
