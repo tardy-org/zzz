@@ -5,46 +5,44 @@ routes: Trie,
 configuration: Configuration,
 
 pub fn init(
-    allocator: mem.Allocator,
+    gpa: mem.Allocator,
     layers: []const Middleware.Layer,
     configuration: Configuration,
 ) !Router {
     return .{
-        .routes = try .init(allocator, layers),
+        .routes = try .init(gpa, layers),
         .configuration = configuration,
     };
 }
 
-pub fn deinit(self: *Router, allocator: mem.Allocator) void {
-    self.routes.deinit(allocator);
+pub fn deinit(router: *Router, gpa: mem.Allocator) void {
+    router.routes.deinit(gpa);
 }
 
 pub fn get_bundle_from_host(
-    self: *const Router,
-    allocator: mem.Allocator,
+    router: *const Router,
+    gpa: mem.Allocator,
     path: []const u8,
     captures: []Trie.Capture,
     queries: *string_map.AnyCase,
 ) !Trie.Bundle {
     queries.clearRetainingCapacity();
 
-    return try self.routes.get_bundle(
-        allocator,
+    return try router.routes.get_bundle(
+        gpa,
         path,
         captures,
         queries,
     ) orelse .{
         .route = Route.init("").all(
             {},
-            self.configuration.not_found,
+            router.configuration.not_found,
         ),
         .captures = captures[0..],
         .queries = queries,
         .duped = &.{},
     };
 }
-
-const log = std.log.scoped(.@"zzz/http/router");
 
 /// Router configuration structure.
 pub const Configuration = struct {
@@ -58,7 +56,7 @@ pub const Query = struct {
 
 /// Default not found handler: send a plain text response.
 pub const default_not_found_handler = struct {
-    fn not_found_handler(ctx: *const Context, _: void) !Respond {
+    fn notFound(ctx: *const Context, _: void) !Respond {
         const response = ctx.response;
         response.status = .@"Not Found";
         response.mime = .TEXT;
@@ -66,7 +64,9 @@ pub const default_not_found_handler = struct {
 
         return .standard;
     }
-}.not_found_handler;
+}.notFound;
+
+const log = std.log.scoped(.@"zzz/http/router");
 
 const std = @import("std");
 const mem = std.mem;
@@ -78,7 +78,7 @@ const Context = http.Context;
 const Mime = http.Mime;
 const Request = http.Request;
 const Respond = http.Respond;
+pub const FsDir = @import("router/FsDir.zig");
 pub const Middleware = @import("router/Middleware.zig");
 pub const Route = @import("router/Route.zig");
 pub const Trie = @import("router/Trie.zig");
-pub const FsDir = @import("router/FsDir.zig");

@@ -13,7 +13,7 @@ pub fn init(path: []const u8) Route {
 
 /// Returns a comma delinated list of allowed Methods for this route. This
 /// is meant to be used as the value for the 'Allow' header in the Response.
-pub fn get_allowed(route: Route, allocator: mem.Allocator) ![]const u8 {
+pub fn get_allowed(route: Route, gpa: mem.Allocator) ![]const u8 {
     // This gets allocated within the context of the connection's arena.
     const allowed_size = comptime blk: {
         var size = 0;
@@ -23,12 +23,12 @@ pub fn get_allowed(route: Route, allocator: mem.Allocator) ![]const u8 {
         break :blk size;
     };
 
-    const buffer = try allocator.alloc(u8, allowed_size);
+    const buffer = try gpa.alloc(u8, allowed_size);
 
     var current: []u8 = "";
     inline for (meta.tags(http.Method)) |method| {
         if (route.handlers[@backingInt(method)] != null) {
-            current = std.fmt.bufPrint(
+            current = mem.print(
                 buffer,
                 "{t},{s}",
                 .{ method, current },
@@ -36,11 +36,10 @@ pub fn get_allowed(route: Route, allocator: mem.Allocator) ![]const u8 {
         }
     }
 
-    if (current.len == 0) {
-        return current;
-    } else {
+    if (current.len == 0)
+        return current
+    else
         return current[0 .. current.len - 1];
-    }
 }
 
 /// Get a defined request handler for the provided method.
@@ -54,7 +53,7 @@ pub fn layer(route: Route) Middleware.Layer {
 }
 
 /// Set a handler function for the provided method.
-inline fn inner_route(
+inline fn create(
     route: Route,
     comptime method: http.Method,
     args: anytype,
@@ -106,7 +105,7 @@ pub fn get(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.GET, args, handler_fn);
+    return route.create(.GET, args, handler_fn);
 }
 
 pub fn head(
@@ -114,7 +113,7 @@ pub fn head(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.HEAD, args, handler_fn);
+    return route.create(.HEAD, args, handler_fn);
 }
 
 pub fn post(
@@ -122,7 +121,7 @@ pub fn post(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.POST, args, handler_fn);
+    return route.create(.POST, args, handler_fn);
 }
 
 pub fn put(
@@ -130,7 +129,7 @@ pub fn put(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.PUT, args, handler_fn);
+    return route.create(.PUT, args, handler_fn);
 }
 
 pub fn delete(
@@ -138,7 +137,7 @@ pub fn delete(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.DELETE, args, handler_fn);
+    return route.create(.DELETE, args, handler_fn);
 }
 
 pub fn connect(
@@ -146,7 +145,7 @@ pub fn connect(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.CONNECT, args, handler_fn);
+    return route.create(.CONNECT, args, handler_fn);
 }
 
 pub fn options(
@@ -154,7 +153,7 @@ pub fn options(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.OPTIONS, args, handler_fn);
+    return route.create(.OPTIONS, args, handler_fn);
 }
 
 pub fn trace(
@@ -162,7 +161,7 @@ pub fn trace(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.TRACE, args, handler_fn);
+    return route.create(.TRACE, args, handler_fn);
 }
 
 pub fn patch(
@@ -170,7 +169,7 @@ pub fn patch(
     args: anytype,
     handler_fn: Handler.TypedFn(@TypeOf(args)),
 ) Route {
-    return route.inner_route(.PATCH, args, handler_fn);
+    return route.create(.PATCH, args, handler_fn);
 }
 
 /// Define a GET handler to serve an embedded file.
@@ -186,22 +185,30 @@ pub fn embed_file(
             const cache_control: []const u8 = if (comptime builtin.mode == .debug)
                 "no-cache"
             else
-                comptime std.fmt.comptimePrint(
+                comptime fmt.comptimePrint(
                     "max-age={d}",
                     .{std.time.s_per_day * 30},
                 );
 
-            try response.headers.put("Cache-Control", cache_control);
+            try response.headers.put(
+                ctx.arena,
+                "Cache-Control",
+                cache_control,
+            );
 
             // If our static item is greater than 1KB,
             // it might be more beneficial to using caching.
             if (comptime bytes.len > 1024) {
                 @setEvalBranchQuota(1_000_000);
-                const etag = comptime std.fmt.comptimePrint(
+                const etag = comptime fmt.comptimePrint(
                     "\"{d}\"",
                     .{std.hash.Wyhash.hash(0, bytes)},
                 );
-                try response.headers.put("ETag", etag[0..]);
+                try response.headers.put(
+                    ctx.arena,
+                    "ETag",
+                    etag[0..],
+                );
 
                 if (ctx.request.headers.get("If-None-Match")) |match| {
                     if (mem.eql(u8, etag, match)) {
@@ -214,9 +221,11 @@ pub fn embed_file(
             }
 
             if (opts.compression) |compression|
-                try response.headers.put("Content-Encoding", @tagName(
-                    compression,
-                ));
+                try response.headers.put(
+                    ctx.arena,
+                    "Content-Encoding",
+                    @tagName(compression),
+                );
 
             return response.apply(.{
                 .status = .OK,
@@ -254,6 +263,7 @@ const log = std.log.scoped(.@"zzz/http/route");
 
 const std = @import("std");
 const mem = std.mem;
+const fmt = std.fmt;
 const meta = std.meta;
 const assert = std.debug.assert;
 const builtin = @import("builtin");

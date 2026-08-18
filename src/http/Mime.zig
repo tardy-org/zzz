@@ -332,9 +332,9 @@ const mime_extension_map: std.StaticStringMap(Mime) = blk: {
     var index: usize = 0;
     for (all_mime_types[0..]) |mime| {
         switch (mime.extension) {
-            .single => |inner| {
+            .single => |single| {
                 defer index += 1;
-                pairs[index] = .{ inner, mime };
+                pairs[index] = .{ single, mime };
             },
             .multiple => |extensions| {
                 for (extensions) |ext| {
@@ -368,9 +368,9 @@ const mime_content_map: std.StaticStringMap(Mime) = blk: {
     var index: usize = 0;
     for (all_mime_types[0..]) |mime| {
         switch (mime.content_type) {
-            .single => |inner| {
+            .single => |single| {
                 defer index += 1;
-                pairs[index] = .{ inner, mime };
+                pairs[index] = .{ single, mime };
             },
             .multiple => |content_types| {
                 for (content_types) |ext| {
@@ -387,10 +387,10 @@ const mime_content_map: std.StaticStringMap(Mime) = blk: {
 test "MIME from extensions" {
     for (all_mime_types) |mime| {
         switch (mime.extension) {
-            .single => |inner| {
+            .single => |single| {
                 try testing.expectEqualStrings(
                     mime.description,
-                    Mime.from_extension(inner).description,
+                    Mime.from_extension(single).description,
                 );
             },
             .multiple => |extensions| {
@@ -414,10 +414,10 @@ test "MIME from unknown extension" {
 test "MIME from content types" {
     for (all_mime_types) |mime| {
         switch (mime.content_type) {
-            .single => |inner| {
+            .single => |single| {
                 try testing.expectEqualStrings(
                     mime.description,
-                    Mime.from_content_type(inner).description,
+                    Mime.from_content_type(single).description,
                 );
             },
             .multiple => |content_types| {

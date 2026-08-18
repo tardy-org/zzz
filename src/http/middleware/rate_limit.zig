@@ -5,7 +5,7 @@
 pub fn RateLimiting(config: *Config) Middleware.Layer {
     const func: Middleware.TypedFn(*Config) = struct {
         fn rate_limit_mw(next: *Middleware.Next, c: *Config) !http.Respond {
-            const ip = get_ip(next.context.tls.inner.addr);
+            const ip = next.ctx.tls.info().address;
             const time = std.time.milliTimestamp();
 
             c.mutex.lock();
@@ -39,19 +39,17 @@ pub fn RateLimiting(config: *Config) Middleware.Layer {
 }
 
 pub const Config = struct {
-    map: std.AutoHashMap(u128, Bucket),
+    map: std.AutoHashMapUnmanaged(u128, Bucket),
     tokens_per_sec: u16,
     max_tokens: u16,
     response_on_limited: http.Response.Fields,
     mutex: std.Thread.Mutex = .{},
 
     pub fn init(
-        allocator: mem.Allocator,
         tokens_per_sec: u16,
         max_tokens: u16,
         response_on_limited: ?http.Respond,
     ) Config {
-        const map: std.AutoHashMap(u128, Bucket) = .init(allocator);
         const respond = response_on_limited orelse .{
             .status = .@"Too Many Requests",
             .mime = .TEXT,
@@ -59,15 +57,15 @@ pub const Config = struct {
         };
 
         return .{
-            .map = map,
+            .map = .empty,
             .tokens_per_sec = tokens_per_sec,
             .max_tokens = max_tokens,
             .response_on_limited = respond,
         };
     }
 
-    pub fn deinit(self: *Config) void {
-        self.map.deinit();
+    pub fn deinit(config: *Config, gpa: mem.Allocator) void {
+        config.map.deinit(gpa);
     }
 };
 
@@ -75,11 +73,18 @@ const Bucket = struct {
     tokens: u16,
     last_refill_ms: i64,
 
-    pub fn replenish(self: *Bucket, time_ms: i64, tokens_per_sec: u16, max_tokens: u16) void {
-        const delta_ms = time_ms - self.last_refill_ms;
-        const new_tokens: u16 = @intCast(@divFloor(delta_ms * tokens_per_sec, std.time.ms_per_s));
-        self.tokens = @min(max_tokens, self.tokens + new_tokens);
-        self.last_refill_ms = time_ms;
+    pub fn replenish(
+        bucket: *Bucket,
+        time_ms: i64,
+        tokens_per_sec: u16,
+        max_tokens: u16,
+    ) void {
+        const delta_ms = time_ms - bucket.last_refill_ms;
+        const new_tokens: u16 = @intCast(
+            @divFloor(delta_ms * tokens_per_sec, std.time.ms_per_s),
+        );
+        bucket.tokens = @min(max_tokens, bucket.tokens + new_tokens);
+        bucket.last_refill_ms = time_ms;
     }
 
     pub fn take(self: *Bucket) bool {
@@ -91,14 +96,6 @@ const Bucket = struct {
         return false;
     }
 };
-
-fn get_ip(addr: std.net.Address) u128 {
-    return switch (addr.any.family) {
-        std.posix.AF.INET => @intCast(addr.in.sa.addr),
-        std.posix.AF.INET6 => mem.bytesAsValue(u128, &addr.in6.sa.addr[0]).*,
-        else => @panic("Not an IP address."),
-    };
-}
 
 const std = @import("std");
 const mem = std.mem;

@@ -34,13 +34,12 @@ const UserInfo = struct {
 
 fn generate(ctx: *const http.Context, _: void) !http.Respond {
     const info = switch (ctx.request.method.?) {
-        .GET => try form.Query(UserInfo).parse(ctx.allocator, ctx),
-        .POST => try form.Form(UserInfo).parse(ctx.allocator, ctx),
+        .GET => try form.Query(UserInfo).parse(ctx),
+        .POST => try form.Form(UserInfo).parse(ctx),
         else => return error.UnexpectedMethod,
     };
 
-    const body = try std.fmt.allocPrint(
-        ctx.allocator,
+    const body = try ctx.arena.print(
         "First: {s} | Middle: {s} | Last: {s} | Age: {d} | Height: {d} | Weight: {s}",
         .{
             info.fname,
@@ -102,7 +101,7 @@ pub fn main(init: std.process.Init) !void {
             fn entry(rt: *tardy.Runtime, p: EntryParams) !void {
                 const server: http.Server = .init(.{
                     .stack_size = .@"1MiB",
-                    .socket_buffer_bytes = 1024 * 2,
+                    .socket_buffer_size = .@"2KiB",
                 });
 
                 try server.serve(rt, p.router, p.tls);

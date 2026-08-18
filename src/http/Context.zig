@@ -2,7 +2,7 @@
 /// that will persist throughout the lifetime of this Request/Response.
 pub const Context = @This();
 
-allocator: std.mem.Allocator,
+arena: mem.Allocator,
 header_writer: *Io.Writer,
 runtime: *Runtime,
 /// The Request that triggered this handler.
@@ -18,6 +18,7 @@ captures: []const Trie.Capture,
 queries: *const string_map.AnyCase,
 
 const std = @import("std");
+const mem = std.mem;
 const Io = std.Io;
 
 const zzz = @import("../root.zig");

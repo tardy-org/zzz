@@ -1,13 +1,13 @@
 // This RoutingTrie is deleteless. It only can create new routes or update existing ones
 pub const Trie = @This();
+
 root: Node,
 middlewares: std.ArrayList(Middleware.WithData),
 
 /// Initialize the routing tree with the given routes.
-pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
-    var self: Trie = .{
+pub fn init(gpa: mem.Allocator, layers: []const Middleware.Layer) !Trie {
+    var trie: Trie = .{
         .root = .init(
-            allocator,
             .{ .fragment = "" },
             null,
         ),
@@ -17,7 +17,7 @@ pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
     for (layers) |layer| {
         switch (layer) {
             .route => |route| {
-                var current = &self.root;
+                var current = &trie.root;
                 var iter = mem.tokenizeScalar(
                     u8,
                     route.path,
@@ -29,43 +29,49 @@ pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
                     if (current.children.getPtr(token)) |child| {
                         current = child;
                     } else {
-                        try current.children.put(token, Node.init(
-                            allocator,
+                        try current.children.put(
+                            gpa,
                             token,
-                            null,
-                        ));
+                            .init(token, null),
+                        );
                         current = current.children.getPtr(token).?;
                     }
                 }
 
-                const r: *Route = if (current.route) |*inner| inner else blk: {
+                const r: *Route = if (current.route) |*current_route|
+                    current_route
+                else blk: {
                     current.route = route;
                     break :blk &current.route.?;
                 };
 
-                for (route.handlers, 0..) |handler, i| if (handler) |h| {
-                    r.handlers[i] = .{
-                        .handler_fn = h.handler_fn,
-                        .middlewares = self.middlewares.items,
-                        .args = h.args,
+                for (route.handlers, 0..) |handler, i|
+                    if (handler) |h| {
+                        r.handlers[i] = .{
+                            .handler_fn = h.handler_fn,
+                            .middlewares = trie.middlewares.items,
+                            .args = h.args,
+                        };
                     };
-                };
             },
-            .middleware => |mw| try self.middlewares.append(allocator, mw),
+            .middleware => |mw| try trie.middlewares.append(
+                gpa,
+                mw,
+            ),
         }
     }
 
-    return self;
+    return trie;
 }
 
-pub fn deinit(self: *Trie, allocator: mem.Allocator) void {
-    self.root.deinit();
-    self.middlewares.deinit(allocator);
+pub fn deinit(trie: *Trie, gpa: mem.Allocator) void {
+    trie.root.deinit(gpa);
+    trie.middlewares.deinit(gpa);
 }
 
 pub fn get_bundle(
-    self: Trie,
-    allocator: mem.Allocator,
+    trie: Trie,
+    gpa: mem.Allocator,
     path: []const u8,
     captures: []Capture,
     queries: *string_map.AnyCase,
@@ -78,7 +84,7 @@ pub fn get_bundle(
         '/',
     );
 
-    var current = self.root;
+    var current = trie.root;
 
     slash_loop: while (iter.next()) |chunk| {
         var child_iter = current.children.iterator();
@@ -87,9 +93,9 @@ pub fn get_bundle(
             const child = entry.value_ptr.*;
 
             switch (token) {
-                .fragment => |inner| if (mem.eql(
+                .fragment => |fragment| if (mem.eql(
                     u8,
-                    inner,
+                    fragment,
                     chunk,
                 )) {
                     current = child;
@@ -129,7 +135,8 @@ pub fn get_bundle(
                             .string = chunk,
                         },
                         .remaining => {
-                            const rest = iter.buffer[(iter.index - chunk.len)..];
+                            const rest =
+                                iter.buffer[(iter.index - chunk.len)..];
                             captures[capture_idx] = .{
                                 .remaining = rest,
                             };
@@ -154,8 +161,8 @@ pub fn get_bundle(
     }
 
     var duped: std.ArrayList([]const u8) = .empty;
-    defer duped.deinit(allocator);
-    errdefer for (duped.items) |d| allocator.free(d);
+    defer duped.deinit(gpa);
+    errdefer for (duped.items) |d| gpa.free(d);
 
     if (query_pos) |pos| {
         if (path.len > pos + 1) {
@@ -180,65 +187,61 @@ pub fn get_bundle(
                     return error.MalformedPair;
 
                 const decoded_key = try form.decode_alloc(
-                    allocator,
+                    gpa,
                     key,
                 );
-                try duped.append(allocator, decoded_key);
+                try duped.append(gpa, decoded_key);
 
                 const decoded_value = try form.decode_alloc(
-                    allocator,
+                    gpa,
                     value,
                 );
-                try duped.append(allocator, decoded_value);
+                try duped.append(gpa, decoded_value);
 
                 // Later values will clobber earlier ones.
-                try queries.put(decoded_key, decoded_value);
+                try queries.put(gpa, decoded_key, decoded_value);
             }
         }
     }
 
+    try duped.shrinkToLen(gpa);
     return .{
         .route = current.route orelse return null,
         .captures = captures[0..capture_idx],
         .queries = queries,
-        .duped = try duped.toOwnedSlice(allocator),
+        .duped = duped.toOwnedSliceAssert(),
     };
 }
 
 fn TokenHashMap(comptime V: type) type {
-    // TODO: use unmanaged variants
-    return std.HashMap(Token, V, struct {
-        pub fn hash(self: @This(), input: Token) u64 {
-            _ = self;
-
+    return std.HashMapUnmanaged(Token, V, struct {
+        pub fn hash(_: @This(), input: Token) u64 {
             const bytes: []const u8 = blk: {
                 switch (input) {
-                    .fragment => |inner| break :blk inner,
-                    .match => |inner| break :blk @tagName(inner),
+                    .fragment => |fragment| break :blk fragment,
+                    .match => |match| break :blk @tagName(match),
                 }
             };
 
-            return std.hash.Wyhash.hash(0, bytes);
+            return Wyhash.hash(0, bytes);
         }
 
-        pub fn eql(self: @This(), first: Token, second: Token) bool {
-            _ = self;
-
+        pub fn eql(_: @This(), first: Token, second: Token) bool {
             const result = blk: {
                 switch (first) {
-                    .fragment => |f_inner| {
+                    .fragment => |fragment_1| {
                         switch (second) {
-                            .fragment => |s_inner| break :blk mem.eql(
+                            .fragment => |fragment_2| break :blk mem.eql(
                                 u8,
-                                f_inner,
-                                s_inner,
+                                fragment_1,
+                                fragment_2,
                             ),
                             else => break :blk false,
                         }
                     },
-                    .match => |f_inner| {
+                    .match => |match_1| {
                         switch (second) {
-                            .match => |s_inner| break :blk f_inner == s_inner,
+                            .match => |match_2| break :blk match_1 == match_2,
                             else => break :blk false,
                         }
                     },
@@ -247,7 +250,7 @@ fn TokenHashMap(comptime V: type) type {
 
             return result;
         }
-    }, 80);
+    }, std.hash_map.default_max_load_percentage);
 }
 
 /// Structure of a node of the trie.
@@ -257,24 +260,23 @@ pub const Node = struct {
     children: TokenHashMap(Node),
 
     /// Initialize a new empty node.
-    pub fn init(allocator: mem.Allocator, token: Token, route: ?Route) Node {
+    pub fn init(token: Token, route: ?Route) Node {
         return .{
             .token = token,
             .route = route,
-            .children = .init(allocator),
+            .children = .empty,
         };
     }
 
-    pub fn deinit(self: *Node) void {
-        var iter = self.children.valueIterator();
+    pub fn deinit(node: *Node, gpa: mem.Allocator) void {
+        var iter = node.children.valueIterator();
 
-        while (iter.next()) |node| {
-            node.deinit();
-        }
+        while (iter.next()) |next_node| next_node.deinit(gpa);
 
-        self.children.deinit();
+        node.children.deinit(gpa);
     }
 };
+
 /// Structure of a matched route.
 pub const Bundle = struct {
     route: Route,
@@ -292,7 +294,8 @@ pub const Capture = union(Token.Match) {
 };
 
 test "Constructing Routing from Path" {
-    var s: Trie = try .init(testing.allocator, &.{
+    const gpa = testing.allocator;
+    var s: Trie = try .init(gpa, &.{
         Route.init("/item").layer(),
         Route.init("/item/%i/description").layer(),
         Route.init("/item/%i/hello").layer(),
@@ -300,13 +303,14 @@ test "Constructing Routing from Path" {
         Route.init("/item/name/%s").layer(),
         Route.init("/item/list").layer(),
     });
-    defer s.deinit(testing.allocator);
+    defer s.deinit(gpa);
 
     try testing.expectEqual(1, s.root.children.count());
 }
 
 test "Routing with Paths" {
-    var s: Trie = try .init(testing.allocator, &.{
+    const gpa = testing.allocator;
+    var s: Trie = try .init(gpa, &.{
         Route.init("/item").layer(),
         Route.init("/item/%i/description").layer(),
         Route.init("/item/%i/hello").layer(),
@@ -314,15 +318,15 @@ test "Routing with Paths" {
         Route.init("/item/name/%s").layer(),
         Route.init("/item/list").layer(),
     });
-    defer s.deinit(testing.allocator);
+    defer s.deinit(gpa);
 
-    var q: string_map.AnyCase = .init(testing.allocator);
-    defer q.deinit();
+    var q: string_map.AnyCase = .empty;
+    defer q.deinit(gpa);
 
     var captures: [8]Capture = @splat(undefined);
 
     try testing.expectEqual(null, try s.get_bundle(
-        testing.allocator,
+        gpa,
         "/item/name",
         captures[0..],
         &q,
@@ -330,7 +334,7 @@ test "Routing with Paths" {
 
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/name/HELLO",
             captures[0..],
             &q,
@@ -348,7 +352,7 @@ test "Routing with Paths" {
 
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/2112.22121/price_float",
             captures[0..],
             &q,
@@ -366,23 +370,24 @@ test "Routing with Paths" {
 }
 
 test "Routing with Remaining" {
-    var s: Trie = try .init(testing.allocator, &.{
+    const gpa = testing.allocator;
+    var s: Trie = try .init(gpa, &.{
         Route.init("/item").layer(),
         Route.init("/item/%f/price_float").layer(),
         Route.init("/item/name/%r").layer(),
         Route.init("/item/%i/price/%f").layer(),
     });
-    defer s.deinit(testing.allocator);
+    defer s.deinit(gpa);
 
-    var q: string_map.AnyCase = .init(testing.allocator);
-    defer q.deinit();
+    var q: string_map.AnyCase = .empty;
+    defer q.deinit(gpa);
 
     var captures: [8]Capture = @splat(undefined);
 
     try testing.expectEqual(
         null,
         try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/name",
             captures[0..],
             &q,
@@ -391,7 +396,7 @@ test "Routing with Remaining" {
 
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/name/HELLO",
             captures[0..],
             &q,
@@ -407,7 +412,7 @@ test "Routing with Remaining" {
     }
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/name/THIS/IS/A/FILE/SYSTEM/PATH.html",
             captures[0..],
             &q,
@@ -424,7 +429,7 @@ test "Routing with Remaining" {
 
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/2112.22121/price_float",
             captures[0..],
             &q,
@@ -438,7 +443,7 @@ test "Routing with Remaining" {
 
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/100/price/283.21",
             captures[0..],
             &q,
@@ -453,21 +458,22 @@ test "Routing with Remaining" {
 }
 
 test "Routing with Queries" {
-    var s: Trie = try .init(testing.allocator, &.{
+    const gpa = testing.allocator;
+    var s: Trie = try .init(gpa, &.{
         Route.init("/item").layer(),
         Route.init("/item/%f/price_float").layer(),
         Route.init("/item/name/%r").layer(),
         Route.init("/item/%i/price/%f").layer(),
     });
-    defer s.deinit(testing.allocator);
+    defer s.deinit(gpa);
 
-    var q: string_map.AnyCase = .init(testing.allocator);
-    defer q.deinit();
+    var q: string_map.AnyCase = .empty;
+    defer q.deinit(gpa);
 
     var captures: [8]Capture = @splat(undefined);
 
     try testing.expectEqual(null, try s.get_bundle(
-        testing.allocator,
+        gpa,
         "/item/name",
         captures[0..],
         &q,
@@ -476,13 +482,13 @@ test "Routing with Queries" {
     {
         q.clearRetainingCapacity();
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/name/HELLO?name=muki&food=waffle",
             captures[0..],
             &q,
         )).?;
-        defer testing.allocator.free(captured.duped);
-        defer for (captured.duped) |dupe| testing.allocator.free(dupe);
+        defer gpa.free(captured.duped);
+        defer for (captured.duped) |dupe| gpa.free(dupe);
 
         try testing.expectEqual(
             Route.init("/item/name/%r"),
@@ -501,13 +507,13 @@ test "Routing with Queries" {
         q.clearRetainingCapacity();
         // Purposefully bad format with no keys or values.
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/2112.22121/price_float?",
             captures[0..],
             &q,
         )).?;
-        defer testing.allocator.free(captured.duped);
-        defer for (captured.duped) |dupe| testing.allocator.free(dupe);
+        defer gpa.free(captured.duped);
+        defer for (captured.duped) |dupe| gpa.free(dupe);
 
         try testing.expectEqual(
             Route.init("/item/%f/price_float"),
@@ -521,7 +527,7 @@ test "Routing with Queries" {
         q.clearRetainingCapacity();
         // Purposefully bad format with incomplete key/value pair.
         const captured = s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/100/price/283.21?help",
             captures[0..],
             &q,
@@ -536,7 +542,7 @@ test "Routing with Queries" {
         q.clearRetainingCapacity();
         // Purposefully bad format with incomplete key/value pair.
         const captured = s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/100/price/283.21?help=",
             captures[0..],
             &q,
@@ -551,7 +557,7 @@ test "Routing with Queries" {
         q.clearRetainingCapacity();
         // Purposefully bad format with invalid charactes.
         const captured = s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/999/price/100.221?page_count=pages=2020&abc=200",
             captures[0..],
             &q,
@@ -563,7 +569,10 @@ test "Routing with Queries" {
     }
 }
 
+const log = std.log.scoped(.@"zzz/http/routing_trie");
+
 const std = @import("std");
+const Wyhash = std.hash.Wyhash;
 const mem = std.mem;
 const fmt = std.fmt;
 const debug = std.debug;
@@ -573,9 +582,6 @@ const zzz = @import("../../root.zig");
 const http = zzz.http;
 const string_map = zzz.core.string_map;
 const form = zzz.http.form;
-
 const Middleware = @import("Middleware.zig");
 const Route = @import("Route.zig");
 const Token = @import("token.zig").Token;
-
-const log = std.log.scoped(.@"zzz/http/routing_trie");

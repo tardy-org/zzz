@@ -19,43 +19,46 @@ pub fn init(first: []const u8, second: []const u8, shared: []u8) Pseudoslice {
 
 /// Operates like a slice. That means it does not capture the end.
 /// Start is an inclusive bound and end is an exclusive bound.
-pub fn get(self: *const Pseudoslice, start: usize, end: usize) []const u8 {
+pub fn get(pseudoslice: *const Pseudoslice, start: usize, end: usize) []const u8 {
     debug.assert(end >= start);
-    debug.assert(self.shared.len >= end - start);
-    const clamped_end = @min(end, self.len);
+    debug.assert(pseudoslice.shared.len >= end - start);
+    const clamped_end = @min(end, pseudoslice.len);
 
-    if (start < self.first.len) {
-        if (clamped_end <= self.first.len) {
+    if (start < pseudoslice.first.len) {
+        if (clamped_end <= pseudoslice.first.len) {
             // within first slice
-            return self.first[start..clamped_end];
+            return pseudoslice.first[start..clamped_end];
         } else {
             // across both slices
-            const first_len = self.first.len - start;
-            const second_len = clamped_end - self.first.len;
+            const first_len = pseudoslice.first.len - start;
+            const second_len = clamped_end - pseudoslice.first.len;
             const total_len = clamped_end - start;
 
-            if (self.first.ptr == self.shared.ptr) {
+            if (pseudoslice.first.ptr == pseudoslice.shared.ptr) {
                 // just copy over the second.
                 @memcpy(
-                    self.shared[self.first.len..][0..second_len],
-                    self.second[0..second_len],
+                    pseudoslice.shared[pseudoslice.first.len..][0..second_len],
+                    pseudoslice.second[0..second_len],
                 );
-                return self.shared[start..clamped_end];
+                return pseudoslice.shared[start..clamped_end];
             } else {
                 // copy both over.
-                @memcpy(self.shared[0..first_len], self.first[start..]);
                 @memcpy(
-                    self.shared[first_len..][0..second_len],
-                    self.second[0..second_len],
+                    pseudoslice.shared[0..first_len],
+                    pseudoslice.first[start..],
                 );
-                return self.shared[0..total_len];
+                @memcpy(
+                    pseudoslice.shared[first_len..][0..second_len],
+                    pseudoslice.second[0..second_len],
+                );
+                return pseudoslice.shared[0..total_len];
             }
         }
     } else {
         // within second slice
-        const second_start = start - self.first.len;
-        const second_end = clamped_end - self.first.len;
-        return self.second[second_start..second_end];
+        const second_start = start - pseudoslice.first.len;
+        const second_end = clamped_end - pseudoslice.first.len;
+        return pseudoslice.second[second_start..second_end];
     }
 }
 
@@ -79,7 +82,11 @@ test "Pseudoslice General" {
 test "Pseudoslice Empty Second" {
     var buffer: [1024]u8 = @splat(0);
     const value = "hello, my name is muki";
-    var pseudo: Pseudoslice = .init(value[0..], &.{}, buffer[0..]);
+    var pseudo: Pseudoslice = .init(
+        value[0..],
+        &.{},
+        buffer[0..],
+    );
 
     for (0..pseudo.len) |i| try testing.expectEqualStrings(
         value[0..i],
@@ -88,17 +95,25 @@ test "Pseudoslice Empty Second" {
 }
 
 test "Pseudoslice First and Shared Same" {
-    const buffer = try testing.allocator.alloc(u8, 1024);
-    defer testing.allocator.free(buffer);
+    const gpa = testing.allocator;
+    const buffer = try gpa.alloc(u8, 1024);
+    defer gpa.free(buffer);
 
     const value = "hello, my name is muki";
     @memcpy(buffer[0..6], value[0..6]);
 
-    var pseudo: Pseudoslice = .init(buffer[0..6], value[6..], buffer);
+    var pseudo: Pseudoslice = .init(
+        buffer[0..6],
+        value[6..],
+        buffer,
+    );
 
     for (0..pseudo.len) |i| {
         for (0..i) |j| {
-            try testing.expectEqualStrings(value[j..i], pseudo.get(j, i));
+            try testing.expectEqualStrings(
+                value[j..i],
+                pseudo.get(j, i),
+            );
         }
     }
 }
