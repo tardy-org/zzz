@@ -23,9 +23,9 @@ pub fn deinit(response: *Response, gpa: mem.Allocator) void {
 }
 
 pub fn apply(response: *Response, into: Fields) !http.Respond {
-    const ctx: *http.Context = @fieldParentPtr(
+    const ctx: *const http.Context = @fieldParentPtr(
         "response",
-        response,
+        &response,
     );
     response.status = into.status;
     response.mime = into.mime;

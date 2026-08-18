@@ -8,7 +8,7 @@ pub const AnyCase = array_hash_map.Custom(
 const Context = struct {
     pub fn hash(_: Context, key: []const u8) u32 {
         var wyhash: std.hash.XxHash3 = .init(0);
-        for (key) |byte| wyhash.update(&.{ascii.toLower(byte)});
+        for (key) |byte| wyhash.update(mem.asBytes(&ascii.toLower(byte)));
         return @truncate(wyhash.final());
     }
 
@@ -33,6 +33,7 @@ test "string_map.AnyCase: Add Stuff" {
 }
 
 const std = @import("std");
+const mem = std.mem;
 const array_hash_map = std.array_hash_map;
 const ascii = std.ascii;
 const testing = std.testing;

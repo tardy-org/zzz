@@ -24,31 +24,19 @@ pub fn serve(
     else
         .static;
 
-    var arena_alloc: ArenaAllocator = .init(rt.gpa);
-    defer arena_alloc.deinit();
-
-    const arena = arena_alloc.allocator();
-
-    const provision_pool = try arena.create(
+    const provision_pool = try rt.gpa.create(
         pool.Pool(Provision),
     );
-    provision_pool.* = try .init(arena, count, pooling);
-    errdefer arena.destroy(provision_pool);
+    provision_pool.* = try .init(rt.gpa, count, pooling);
+    errdefer rt.gpa.destroy(provision_pool);
 
-    const connection_count = try arena.create(usize);
-    errdefer arena.destroy(connection_count);
+    const connection_count = try rt.gpa.create(usize);
+    errdefer rt.gpa.destroy(connection_count);
     connection_count.* = 0;
 
-    const accept_queued = try arena.create(bool);
-    errdefer arena.destroy(accept_queued);
+    const accept_queued = try rt.gpa.create(bool);
+    errdefer rt.gpa.destroy(accept_queued);
     accept_queued.* = true;
-
-    const pool_header_buffer: []u8 = try arena.alloc(
-        u8,
-        count * server.config.max_http_header_size.Usize(),
-    );
-    errdefer arena.free(pool_header_buffer);
-    var next_header_buffer_index: usize = 0;
 
     // initialize first batch of provisions :)
     for (provision_pool.items) |*provision| {
@@ -57,19 +45,22 @@ pub fn serve(
             rt.gpa,
             server.config.socket_buffer_size.Usize(),
         );
-        errdefer provision.zc_recv_buffer.deinit(arena);
+        errdefer provision.zc_recv_buffer.deinit(rt.gpa);
 
-        provision.header_writer = .fixed(
-            pool_header_buffer[next_header_buffer_index..][0..server.config.max_http_header_size.Usize()],
+        const header_buf = try rt.gpa.alloc(
+            u8,
+            server.config.max_http_header_size.Usize(),
         );
-        next_header_buffer_index += server.config.max_http_header_size.Usize();
+        errdefer rt.gpa.free(header_buf);
+        provision.header_writer = .fixed(header_buf);
 
-        provision.captures = try arena.alloc(
+        provision.captures = try rt.gpa.alloc(
             Trie.Capture,
             server.config.max_capture_count,
         );
-        errdefer arena.free(provision.captures);
+        errdefer rt.gpa.free(provision.captures);
 
+        provision.arena = .init(rt.gpa);
         provision.queries = .empty;
         provision.storage = .empty;
         provision.request = .empty;
@@ -80,7 +71,6 @@ pub fn serve(
         mainLoop,
         .{
             rt,
-            arena,
             server.config,
             router,
             tls,
@@ -94,7 +84,6 @@ pub fn serve(
 
 pub fn mainLoop(
     rt: *Runtime,
-    arena: *ArenaAllocator,
     config: Config,
     router: *const Router,
     tls: *const Secsock,
@@ -109,7 +98,6 @@ pub fn mainLoop(
                 mainLoop,
                 .{
                     rt,
-                    arena,
                     config,
                     router,
                     tls,
@@ -138,7 +126,6 @@ pub fn mainLoop(
         mainLoop,
         .{
             rt,
-            arena,
             config,
             router,
             tls,
@@ -150,7 +137,7 @@ pub fn mainLoop(
     );
     accept_queued.* = true;
 
-    const index = try provisions.borrow(arena);
+    const index = try provisions.borrow(rt.gpa);
     defer provisions.release(index);
     const provision = provisions.get_ptr(index);
 
@@ -159,21 +146,25 @@ pub fn mainLoop(
     if (!provision.initalized) {
         log.debug("initalizing new provision", .{});
         provision.zc_recv_buffer = try .init(
-            arena,
+            rt.gpa,
             config.socket_buffer_size.Usize(),
         );
-        errdefer provision.zc_recv_buffer.deinit(arena);
+        errdefer provision.zc_recv_buffer.deinit(rt.gpa);
 
-        // TODO: use a server config option
-        provision.header_writer = .fixed(
-            try provision.arena_state.allocator().alloc(u8, 8 * 1024),
+        const header_buf = try rt.gpa.alloc(
+            u8,
+            config.max_http_header_size.Usize(),
         );
-        provision.captures = try arena.alloc(
+        errdefer rt.gpa.free(header_buf);
+        provision.header_writer = .fixed(header_buf);
+
+        provision.captures = try rt.gpa.alloc(
             Trie.Capture,
             config.max_capture_count,
         );
-        errdefer arena.free(provision.captures);
+        errdefer rt.gpa.free(provision.captures);
 
+        provision.arena = .init(rt.gpa);
         provision.queries = .empty;
         provision.storage = .empty;
         provision.request = .empty;
@@ -181,7 +172,7 @@ pub fn mainLoop(
         provision.initalized = true;
     }
     defer prepare_new_request(
-        arena,
+        rt.gpa,
         null,
         provision,
         config,
@@ -235,6 +226,7 @@ pub fn mainLoop(
                 )) |header_end| {
                     const real_header_end = header_end + 4;
                     try provision.request.parse_headers(
+                        rt.gpa,
                         // Add 4 to account for the actual header end sequence.
                         provision.zc_recv_buffer.subslice(
                             .{ .end = real_header_end },
@@ -337,7 +329,7 @@ pub fn mainLoop(
 
             const context: http.Context = .{
                 .runtime = rt,
-                .arena = arena.allocator(),
+                .arena = provision.arena.allocator(),
                 .header_writer = &provision.header_writer,
                 .request = &provision.request,
                 .response = &provision.response,
@@ -490,23 +482,22 @@ pub fn mainLoop(
 }
 
 fn prepare_new_request(
-    arena: *ArenaAllocator,
+    gpa: mem.Allocator,
     state: ?*State,
     provision: *Provision,
     config: Config,
 ) !void {
     debug.assert(provision.initalized);
-    const alloc = arena.allocator();
-    provision.request.clear(alloc);
+    provision.request.clear(gpa);
     provision.response.clear();
-    provision.storage.clear(alloc);
+    provision.storage.clear(gpa);
     provision.zc_recv_buffer.clear_retaining_capacity();
     _ = provision.header_writer.consumeAll();
-    _ = alloc.reset(.{
+    _ = provision.arena.reset(.{
         .retain_with_limit = config.retained_arena_bytes.Usize(),
     });
     provision.recv_slice = try provision.zc_recv_buffer.get_write_area(
-        alloc,
+        gpa,
         config.socket_buffer_size.Usize(),
     );
 
@@ -613,6 +604,7 @@ pub const Provision = struct {
     recv_slice: []u8,
     zc_recv_buffer: ZeroCopy(u8),
     header_writer: Io.Writer,
+    arena: std.heap.ArenaAllocator,
     storage: zcore.Storage,
     captures: []Trie.Capture,
     queries: string_map.AnyCase,

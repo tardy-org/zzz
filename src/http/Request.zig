@@ -33,10 +33,11 @@ const ParseOptions = struct {
 
 pub fn parse_headers(
     request: *Request,
+    gpa: mem.Allocator,
     bytes: []const u8,
     options: ParseOptions,
 ) (OoM || http.Error)!void {
-    request.clear();
+    request.clear(gpa);
     var total_size: u32 = 0;
     var lines = mem.tokenizeAny(
         u8,
@@ -95,12 +96,12 @@ pub fn parse_headers(
                 &.{' '},
             );
             if (value.len == 0) return error.MalformedRequest;
-            try request.headers.put(key, value);
+            try request.headers.put(gpa, key, value);
         }
     }
 
     if (request.headers.get("Cookie")) |cookies|
-        try request.cookies.parse_from_header(cookies);
+        try request.cookies.parse_from_header(gpa, cookies);
 }
 
 pub const SetOptions = struct {

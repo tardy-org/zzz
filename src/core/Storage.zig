@@ -21,7 +21,7 @@ pub fn deinit(storage: *Storage, gpa: mem.Allocator) void {
 
 /// Clears the Storage.
 pub fn clear(storage: *Storage, gpa: mem.Allocator) void {
-    const arena = storage.arena_state.promote(gpa);
+    var arena = storage.arena_state.promote(gpa);
     defer storage.arena_state = arena.state;
 
     storage.map.clearAndFree(arena.allocator());

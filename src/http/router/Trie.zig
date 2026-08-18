@@ -71,7 +71,7 @@ pub fn deinit(trie: *Trie, allocator: mem.Allocator) void {
 
 pub fn get_bundle(
     trie: Trie,
-    allocator: mem.Allocator,
+    gpa: mem.Allocator,
     path: []const u8,
     captures: []Capture,
     queries: *string_map.AnyCase,
@@ -161,8 +161,8 @@ pub fn get_bundle(
     }
 
     var duped: std.ArrayList([]const u8) = .empty;
-    defer duped.deinit(allocator);
-    errdefer for (duped.items) |d| allocator.free(d);
+    defer duped.deinit(gpa);
+    errdefer for (duped.items) |d| gpa.free(d);
 
     if (query_pos) |pos| {
         if (path.len > pos + 1) {
@@ -187,19 +187,19 @@ pub fn get_bundle(
                     return error.MalformedPair;
 
                 const decoded_key = try form.decode_alloc(
-                    allocator,
+                    gpa,
                     key,
                 );
-                try duped.append(allocator, decoded_key);
+                try duped.append(gpa, decoded_key);
 
                 const decoded_value = try form.decode_alloc(
-                    allocator,
+                    gpa,
                     value,
                 );
-                try duped.append(allocator, decoded_value);
+                try duped.append(gpa, decoded_value);
 
                 // Later values will clobber earlier ones.
-                try queries.put(decoded_key, decoded_value);
+                try queries.put(gpa, decoded_key, decoded_value);
             }
         }
     }
@@ -208,7 +208,7 @@ pub fn get_bundle(
         .route = current.route orelse return null,
         .captures = captures[0..capture_idx],
         .queries = queries,
-        .duped = try duped.toOwnedSlice(allocator),
+        .duped = duped.toOwnedSliceAssert(),
     };
 }
 

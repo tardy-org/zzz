@@ -148,7 +148,11 @@ pub const Map = struct {
             const value_dup = try gpa.dupe(u8, value);
             errdefer gpa.free(value_dup);
 
-            if (try map.map.fetchPut(key_dup, value_dup)) |existing| {
+            if (try map.map.fetchPut(
+                gpa,
+                key_dup,
+                value_dup,
+            )) |existing| {
                 gpa.free(existing.key);
                 gpa.free(existing.value);
             }
