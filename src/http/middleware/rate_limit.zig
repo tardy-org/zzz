@@ -39,19 +39,17 @@ pub fn RateLimiting(config: *Config) Middleware.Layer {
 }
 
 pub const Config = struct {
-    map: std.AutoHashMap(u128, Bucket),
+    map: std.AutoHashMapUnmanaged(u128, Bucket),
     tokens_per_sec: u16,
     max_tokens: u16,
     response_on_limited: http.Response.Fields,
     mutex: std.Thread.Mutex = .{},
 
     pub fn init(
-        allocator: mem.Allocator,
         tokens_per_sec: u16,
         max_tokens: u16,
         response_on_limited: ?http.Respond,
     ) Config {
-        const map: std.AutoHashMap(u128, Bucket) = .init(allocator);
         const respond = response_on_limited orelse .{
             .status = .@"Too Many Requests",
             .mime = .TEXT,
@@ -59,15 +57,15 @@ pub const Config = struct {
         };
 
         return .{
-            .map = map,
+            .map = .empty,
             .tokens_per_sec = tokens_per_sec,
             .max_tokens = max_tokens,
             .response_on_limited = respond,
         };
     }
 
-    pub fn deinit(config: *Config) void {
-        config.map.deinit();
+    pub fn deinit(config: *Config, gpa: mem.Allocator) void {
+        config.map.deinit(gpa);
     }
 };
 

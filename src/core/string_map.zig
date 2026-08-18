@@ -1,18 +1,17 @@
-pub const AnyCase = array_hash_map.Custom(
+pub const AnyCase = std.HashMapUnmanaged(
     []const u8,
     []const u8,
+    // needed because the comparision ignores case
     Context,
-    true,
+    std.hash_map.default_max_load_percentage,
 );
 
 const Context = struct {
-    pub fn hash(_: Context, key: []const u8) u32 {
-        var wyhash: std.hash.XxHash3 = .init(0);
-        for (key) |byte| wyhash.update(mem.asBytes(&ascii.toLower(byte)));
-        return @truncate(wyhash.final());
+    pub fn hash(_: Context, key: []const u8) u64 {
+        return std.hash.Wyhash.hash(0, key);
     }
 
-    pub fn eql(_: Context, key_a: []const u8, key_b: []const u8, _: usize) bool {
+    pub fn eql(_: Context, key_a: []const u8, key_b: []const u8) bool {
         return ascii.eqlIgnoreCase(key_a, key_b);
     }
 };

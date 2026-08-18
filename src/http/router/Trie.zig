@@ -1,13 +1,13 @@
 // This RoutingTrie is deleteless. It only can create new routes or update existing ones
 pub const Trie = @This();
+
 root: Node,
 middlewares: std.ArrayList(Middleware.WithData),
 
 /// Initialize the routing tree with the given routes.
-pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
+pub fn init(gpa: mem.Allocator, layers: []const Middleware.Layer) !Trie {
     var trie: Trie = .{
         .root = .init(
-            allocator,
             .{ .fragment = "" },
             null,
         ),
@@ -29,11 +29,11 @@ pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
                     if (current.children.getPtr(token)) |child| {
                         current = child;
                     } else {
-                        try current.children.put(token, Node.init(
-                            allocator,
+                        try current.children.put(
+                            gpa,
                             token,
-                            null,
-                        ));
+                            .init(token, null),
+                        );
                         current = current.children.getPtr(token).?;
                     }
                 }
@@ -55,7 +55,7 @@ pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
                     };
             },
             .middleware => |mw| try trie.middlewares.append(
-                allocator,
+                gpa,
                 mw,
             ),
         }
@@ -64,9 +64,9 @@ pub fn init(allocator: mem.Allocator, layers: []const Middleware.Layer) !Trie {
     return trie;
 }
 
-pub fn deinit(trie: *Trie, allocator: mem.Allocator) void {
-    trie.root.deinit();
-    trie.middlewares.deinit(allocator);
+pub fn deinit(trie: *Trie, gpa: mem.Allocator) void {
+    trie.root.deinit(gpa);
+    trie.middlewares.deinit(gpa);
 }
 
 pub fn get_bundle(
@@ -213,10 +213,8 @@ pub fn get_bundle(
 }
 
 fn TokenHashMap(comptime V: type) type {
-    // TODO: use unmanaged variants
-    return std.HashMap(Token, V, struct {
-        const TokenHashMap_t = @This();
-        pub fn hash(_: TokenHashMap_t, input: Token) u64 {
+    return std.HashMapUnmanaged(Token, V, struct {
+        pub fn hash(_: @This(), input: Token) u64 {
             const bytes: []const u8 = blk: {
                 switch (input) {
                     .fragment => |fragment| break :blk fragment,
@@ -227,7 +225,7 @@ fn TokenHashMap(comptime V: type) type {
             return Wyhash.hash(0, bytes);
         }
 
-        pub fn eql(_: TokenHashMap_t, first: Token, second: Token) bool {
+        pub fn eql(_: @This(), first: Token, second: Token) bool {
             const result = blk: {
                 switch (first) {
                     .fragment => |fragment_1| {
@@ -251,7 +249,7 @@ fn TokenHashMap(comptime V: type) type {
 
             return result;
         }
-    }, 80);
+    }, std.hash_map.default_max_load_percentage);
 }
 
 /// Structure of a node of the trie.
@@ -261,22 +259,20 @@ pub const Node = struct {
     children: TokenHashMap(Node),
 
     /// Initialize a new empty node.
-    pub fn init(allocator: mem.Allocator, token: Token, route: ?Route) Node {
+    pub fn init(token: Token, route: ?Route) Node {
         return .{
             .token = token,
             .route = route,
-            .children = .init(allocator),
+            .children = .empty,
         };
     }
 
-    pub fn deinit(node: *Node) void {
+    pub fn deinit(node: *Node, gpa: mem.Allocator) void {
         var iter = node.children.valueIterator();
 
-        while (iter.next()) |next_node| {
-            next_node.deinit();
-        }
+        while (iter.next()) |next_node| next_node.deinit(gpa);
 
-        node.children.deinit();
+        node.children.deinit(gpa);
     }
 };
 
@@ -297,7 +293,8 @@ pub const Capture = union(Token.Match) {
 };
 
 test "Constructing Routing from Path" {
-    var s: Trie = try .init(testing.allocator, &.{
+    const gpa = testing.allocator;
+    var s: Trie = try .init(gpa, &.{
         Route.init("/item").layer(),
         Route.init("/item/%i/description").layer(),
         Route.init("/item/%i/hello").layer(),
@@ -305,13 +302,14 @@ test "Constructing Routing from Path" {
         Route.init("/item/name/%s").layer(),
         Route.init("/item/list").layer(),
     });
-    defer s.deinit(testing.allocator);
+    defer s.deinit(gpa);
 
     try testing.expectEqual(1, s.root.children.count());
 }
 
 test "Routing with Paths" {
-    var s: Trie = try .init(testing.allocator, &.{
+    const gpa = testing.allocator;
+    var s: Trie = try .init(gpa, &.{
         Route.init("/item").layer(),
         Route.init("/item/%i/description").layer(),
         Route.init("/item/%i/hello").layer(),
@@ -319,15 +317,15 @@ test "Routing with Paths" {
         Route.init("/item/name/%s").layer(),
         Route.init("/item/list").layer(),
     });
-    defer s.deinit(testing.allocator);
+    defer s.deinit(gpa);
 
-    var q: string_map.AnyCase = .init(testing.allocator);
-    defer q.deinit();
+    var q: string_map.AnyCase = .empty;
+    defer q.deinit(gpa);
 
     var captures: [8]Capture = @splat(undefined);
 
     try testing.expectEqual(null, try s.get_bundle(
-        testing.allocator,
+        gpa,
         "/item/name",
         captures[0..],
         &q,
@@ -335,7 +333,7 @@ test "Routing with Paths" {
 
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/name/HELLO",
             captures[0..],
             &q,
@@ -353,7 +351,7 @@ test "Routing with Paths" {
 
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/2112.22121/price_float",
             captures[0..],
             &q,
@@ -371,23 +369,24 @@ test "Routing with Paths" {
 }
 
 test "Routing with Remaining" {
-    var s: Trie = try .init(testing.allocator, &.{
+    const gpa = testing.allocator;
+    var s: Trie = try .init(gpa, &.{
         Route.init("/item").layer(),
         Route.init("/item/%f/price_float").layer(),
         Route.init("/item/name/%r").layer(),
         Route.init("/item/%i/price/%f").layer(),
     });
-    defer s.deinit(testing.allocator);
+    defer s.deinit(gpa);
 
-    var q: string_map.AnyCase = .init(testing.allocator);
-    defer q.deinit();
+    var q: string_map.AnyCase = .empty;
+    defer q.deinit(gpa);
 
     var captures: [8]Capture = @splat(undefined);
 
     try testing.expectEqual(
         null,
         try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/name",
             captures[0..],
             &q,
@@ -396,7 +395,7 @@ test "Routing with Remaining" {
 
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/name/HELLO",
             captures[0..],
             &q,
@@ -412,7 +411,7 @@ test "Routing with Remaining" {
     }
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/name/THIS/IS/A/FILE/SYSTEM/PATH.html",
             captures[0..],
             &q,
@@ -429,7 +428,7 @@ test "Routing with Remaining" {
 
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/2112.22121/price_float",
             captures[0..],
             &q,
@@ -443,7 +442,7 @@ test "Routing with Remaining" {
 
     {
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/100/price/283.21",
             captures[0..],
             &q,
@@ -458,21 +457,22 @@ test "Routing with Remaining" {
 }
 
 test "Routing with Queries" {
-    var s: Trie = try .init(testing.allocator, &.{
+    const gpa = testing.allocator;
+    var s: Trie = try .init(gpa, &.{
         Route.init("/item").layer(),
         Route.init("/item/%f/price_float").layer(),
         Route.init("/item/name/%r").layer(),
         Route.init("/item/%i/price/%f").layer(),
     });
-    defer s.deinit(testing.allocator);
+    defer s.deinit(gpa);
 
-    var q: string_map.AnyCase = .init(testing.allocator);
-    defer q.deinit();
+    var q: string_map.AnyCase = .empty;
+    defer q.deinit(gpa);
 
     var captures: [8]Capture = @splat(undefined);
 
     try testing.expectEqual(null, try s.get_bundle(
-        testing.allocator,
+        gpa,
         "/item/name",
         captures[0..],
         &q,
@@ -481,13 +481,13 @@ test "Routing with Queries" {
     {
         q.clearRetainingCapacity();
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/name/HELLO?name=muki&food=waffle",
             captures[0..],
             &q,
         )).?;
-        defer testing.allocator.free(captured.duped);
-        defer for (captured.duped) |dupe| testing.allocator.free(dupe);
+        defer gpa.free(captured.duped);
+        defer for (captured.duped) |dupe| gpa.free(dupe);
 
         try testing.expectEqual(
             Route.init("/item/name/%r"),
@@ -506,13 +506,13 @@ test "Routing with Queries" {
         q.clearRetainingCapacity();
         // Purposefully bad format with no keys or values.
         const captured = (try s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/2112.22121/price_float?",
             captures[0..],
             &q,
         )).?;
-        defer testing.allocator.free(captured.duped);
-        defer for (captured.duped) |dupe| testing.allocator.free(dupe);
+        defer gpa.free(captured.duped);
+        defer for (captured.duped) |dupe| gpa.free(dupe);
 
         try testing.expectEqual(
             Route.init("/item/%f/price_float"),
@@ -526,7 +526,7 @@ test "Routing with Queries" {
         q.clearRetainingCapacity();
         // Purposefully bad format with incomplete key/value pair.
         const captured = s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/100/price/283.21?help",
             captures[0..],
             &q,
@@ -541,7 +541,7 @@ test "Routing with Queries" {
         q.clearRetainingCapacity();
         // Purposefully bad format with incomplete key/value pair.
         const captured = s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/100/price/283.21?help=",
             captures[0..],
             &q,
@@ -556,7 +556,7 @@ test "Routing with Queries" {
         q.clearRetainingCapacity();
         // Purposefully bad format with invalid charactes.
         const captured = s.get_bundle(
-            testing.allocator,
+            gpa,
             "/item/999/price/100.221?page_count=pages=2020&abc=200",
             captures[0..],
             &q,
@@ -567,6 +567,8 @@ test "Routing with Queries" {
         );
     }
 }
+
+const log = std.log.scoped(.@"zzz/http/routing_trie");
 
 const std = @import("std");
 const Wyhash = std.hash.Wyhash;
@@ -579,9 +581,6 @@ const zzz = @import("../../root.zig");
 const http = zzz.http;
 const string_map = zzz.core.string_map;
 const form = zzz.http.form;
-
 const Middleware = @import("Middleware.zig");
 const Route = @import("Route.zig");
 const Token = @import("token.zig").Token;
-
-const log = std.log.scoped(.@"zzz/http/routing_trie");

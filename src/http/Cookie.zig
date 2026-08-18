@@ -85,7 +85,7 @@ pub fn to_string_alloc(cookie: Cookie, allocator: mem.Allocator) ![]const u8 {
 }
 
 pub const Map = struct {
-    map: array_hash_map.String([]const u8),
+    map: std.StringHashMapUnmanaged([]const u8),
 
     pub const empty: Map = .{
         .map = .empty,
@@ -117,7 +117,7 @@ pub const Map = struct {
         return map.map.count();
     }
 
-    pub fn iterator(map: *const Map) array_hash_map.String([]const u8).Iterator {
+    pub fn iterator(map: *const Map) std.StringHashMapUnmanaged([]const u8).Iterator {
         return map.map.iterator();
     }
 
@@ -200,7 +200,6 @@ test "Cookie: Response Formatting" {
 }
 
 const std = @import("std");
-const array_hash_map = std.array_hash_map;
 const mem = std.mem;
 const testing = std.testing;
 const Io = std.Io;
