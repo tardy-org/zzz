@@ -8,7 +8,9 @@ pub const AnyCase = std.HashMapUnmanaged(
 
 const Context = struct {
     pub fn hash(_: Context, key: []const u8) u64 {
-        return std.hash.Wyhash.hash(0, key);
+        var hasher: std.hash.Wyhash = .init(0);
+        for (key) |byte| hasher.update(mem.asBytes(&ascii.toLower(byte)));
+        return hasher.final();
     }
 
     pub fn eql(_: Context, key_a: []const u8, key_b: []const u8) bool {

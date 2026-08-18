@@ -13,7 +13,7 @@ pub fn init(path: []const u8) Route {
 
 /// Returns a comma delinated list of allowed Methods for this route. This
 /// is meant to be used as the value for the 'Allow' header in the Response.
-pub fn get_allowed(route: Route, allocator: mem.Allocator) ![]const u8 {
+pub fn get_allowed(route: Route, gpa: mem.Allocator) ![]const u8 {
     // This gets allocated within the context of the connection's arena.
     const allowed_size = comptime blk: {
         var size = 0;
@@ -23,12 +23,12 @@ pub fn get_allowed(route: Route, allocator: mem.Allocator) ![]const u8 {
         break :blk size;
     };
 
-    const buffer = try allocator.alloc(u8, allowed_size);
+    const buffer = try gpa.alloc(u8, allowed_size);
 
     var current: []u8 = "";
     inline for (meta.tags(http.Method)) |method| {
         if (route.handlers[@backingInt(method)] != null) {
-            current = std.fmt.bufPrint(
+            current = mem.print(
                 buffer,
                 "{t},{s}",
                 .{ method, current },
@@ -36,11 +36,10 @@ pub fn get_allowed(route: Route, allocator: mem.Allocator) ![]const u8 {
         }
     }
 
-    if (current.len == 0) {
-        return current;
-    } else {
+    if (current.len == 0)
+        return current
+    else
         return current[0 .. current.len - 1];
-    }
 }
 
 /// Get a defined request handler for the provided method.

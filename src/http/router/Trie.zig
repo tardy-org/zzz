@@ -204,6 +204,7 @@ pub fn get_bundle(
         }
     }
 
+    try duped.shrinkToLen(gpa);
     return .{
         .route = current.route orelse return null,
         .captures = captures[0..capture_idx],

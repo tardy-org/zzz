@@ -34,8 +34,8 @@ const UserInfo = struct {
 
 fn generate(ctx: *const http.Context, _: void) !http.Respond {
     const info = switch (ctx.request.method.?) {
-        .GET => try form.Query(UserInfo).parse(ctx.arena, ctx),
-        .POST => try form.Form(UserInfo).parse(ctx.arena, ctx),
+        .GET => try form.Query(UserInfo).parse(ctx),
+        .POST => try form.Form(UserInfo).parse(ctx),
         else => return error.UnexpectedMethod,
     };
 

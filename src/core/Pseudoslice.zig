@@ -82,7 +82,11 @@ test "Pseudoslice General" {
 test "Pseudoslice Empty Second" {
     var buffer: [1024]u8 = @splat(0);
     const value = "hello, my name is muki";
-    var pseudo: Pseudoslice = .init(value[0..], &.{}, buffer[0..]);
+    var pseudo: Pseudoslice = .init(
+        value[0..],
+        &.{},
+        buffer[0..],
+    );
 
     for (0..pseudo.len) |i| try testing.expectEqualStrings(
         value[0..i],
@@ -91,17 +95,25 @@ test "Pseudoslice Empty Second" {
 }
 
 test "Pseudoslice First and Shared Same" {
-    const buffer = try testing.allocator.alloc(u8, 1024);
-    defer testing.allocator.free(buffer);
+    const gpa = testing.allocator;
+    const buffer = try gpa.alloc(u8, 1024);
+    defer gpa.free(buffer);
 
     const value = "hello, my name is muki";
     @memcpy(buffer[0..6], value[0..6]);
 
-    var pseudo: Pseudoslice = .init(buffer[0..6], value[6..], buffer);
+    var pseudo: Pseudoslice = .init(
+        buffer[0..6],
+        value[6..],
+        buffer,
+    );
 
     for (0..pseudo.len) |i| {
         for (0..i) |j| {
-            try testing.expectEqualStrings(value[j..i], pseudo.get(j, i));
+            try testing.expectEqualStrings(
+                value[j..i],
+                pseudo.get(j, i),
+            );
         }
     }
 }

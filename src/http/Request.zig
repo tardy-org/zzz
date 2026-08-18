@@ -133,6 +133,7 @@ pub fn expect_body(request: *const Request) bool {
 }
 
 test "Parse Request" {
+    const gpa = testing.allocator;
     const request_text =
         \\GET / HTTP/1.1
         \\Host: localhost:9862
@@ -140,10 +141,10 @@ test "Parse Request" {
         \\Accept: text/html
     ;
 
-    var request: Request = .init(testing.allocator);
-    defer request.deinit();
+    var request: Request = .empty;
+    defer request.deinit(gpa);
 
-    try request.parse_headers(request_text[0..], .{
+    try request.parse_headers(gpa, request_text[0..], .{
         .max_request_bytes = .KiB(1),
         .max_uri_bytes = .Bytes(256),
     });
@@ -179,10 +180,12 @@ test "Expect ContentTooLong Error" {
         request_text_format,
         .{large_content},
     );
-    var request: Request = .init(testing.allocator);
-    defer request.deinit();
+    const gpa = testing.allocator;
+    var request: Request = .empty;
+    defer request.deinit(gpa);
 
     const err = request.parse_headers(
+        gpa,
         request_text[0..],
         .{
             .max_request_bytes = .Bytes(128),
@@ -208,10 +211,12 @@ test "Expect URITooLong Error" {
         request_text_format,
         .{large_content[0..]},
     );
-    var request: Request = .init(testing.allocator);
-    defer request.deinit();
+    const gpa = testing.allocator;
+    var request: Request = .empty;
+    defer request.deinit(gpa);
 
     const err = request.parse_headers(
+        gpa,
         request_text[0..],
         .{
             .max_request_bytes = .@"1MiB",
@@ -233,10 +238,12 @@ test "Expect Malformed when URI missing /" {
         request_text_format,
         .{content[0..]},
     );
-    var request: Request = .init(testing.allocator);
-    defer request.deinit();
+    const gpa = testing.allocator;
+    var request: Request = .empty;
+    defer request.deinit(gpa);
 
     const err = request.parse_headers(
+        gpa,
         request_text[0..],
         .{
             .max_request_bytes = .KiB(1),
@@ -257,10 +264,12 @@ test "Expect Incorrect HTTP Version" {
         \\Accept: text/html
     ;
 
-    var request: Request = .init(testing.allocator);
-    defer request.deinit();
+    const gpa = testing.allocator;
+    var request: Request = .empty;
+    defer request.deinit(gpa);
 
     const err = request.parse_headers(
+        gpa,
         request_text[0..],
         .{
             .max_request_bytes = .KiB(1),
@@ -281,10 +290,12 @@ test "Malformed string_map.AnyCase" {
         \\Accept: text/html
     ;
 
-    var request: Request = .init(testing.allocator);
-    defer request.deinit();
+    const gpa = testing.allocator;
+    var request: Request = .empty;
+    defer request.deinit(gpa);
 
     const err = request.parse_headers(
+        gpa,
         request_text[0..],
         .{
             .max_request_bytes = .KiB(1),

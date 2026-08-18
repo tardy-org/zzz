@@ -56,9 +56,9 @@ pub fn to_string_buf(cookie: Cookie, buf: []u8) ![]const u8 {
     return writer.buffered();
 }
 
-pub fn to_string_alloc(cookie: Cookie, allocator: mem.Allocator) ![]const u8 {
+pub fn to_string_alloc(cookie: Cookie, gpa: mem.Allocator) ![]const u8 {
     var aw: Io.Writer.Allocating = try .initCapacity(
-        allocator,
+        gpa,
         128,
     );
     errdefer aw.deinit();

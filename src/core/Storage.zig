@@ -12,31 +12,31 @@ pub const empty: Storage = .{
 };
 
 pub fn deinit(storage: *Storage, gpa: mem.Allocator) void {
-    const arena = storage.arena_state.promote(gpa);
-    storage.map.deinit(arena.allocator());
-    arena.deinit();
+    var arena_alloc = storage.arena_state.promote(gpa);
+    storage.map.deinit(arena_alloc.allocator());
+    arena_alloc.deinit();
 }
 
 /// Clears the Storage.
 pub fn clear(storage: *Storage, gpa: mem.Allocator) void {
-    var arena = storage.arena_state.promote(gpa);
-    defer storage.arena_state = arena.state;
+    var arena_alloc = storage.arena_state.promote(gpa);
+    defer storage.arena_state = arena_alloc.state;
 
-    storage.map.clearAndFree(arena.allocator());
-    _ = arena.reset(.retain_capacity);
+    storage.map.clearAndFree(arena_alloc.allocator());
+    _ = arena_alloc.reset(.retain_capacity);
 }
 
 /// Inserts a value into the Storage.
 /// It uses the given type as the K.
 pub fn put(storage: *Storage, gpa: mem.Allocator, comptime T: type, value: T) !void {
-    var arena = storage.arena_state.promote(gpa);
-    defer storage.arena_state = arena.state;
+    var arena_alloc = storage.arena_state.promote(gpa);
+    defer storage.arena_state = arena_alloc.state;
 
-    const allocator = arena.allocator();
-    const ptr = try allocator.create(T);
+    const arena = arena_alloc.allocator();
+    const ptr = try arena.create(T);
     ptr.* = value;
     const type_id = comptime hash.Wyhash.hash(0, @typeName(T));
-    try storage.map.put(allocator, type_id, @ptrCast(ptr));
+    try storage.map.put(arena, type_id, @ptrCast(ptr));
 }
 
 /// Extracts a value out of the Storage.

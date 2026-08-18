@@ -2,7 +2,7 @@ test "zzz unit tests" {
     // Core
     _ = core.string_map.AnyCase;
     _ = core.Pseudoslice;
-    _ = core.TypedStorage;
+    _ = core.Storage;
 
     // HTTP
     _ = http.Context;

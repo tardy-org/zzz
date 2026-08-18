@@ -25,11 +25,12 @@ const HTTPDate = struct {
 
     pub fn into_buf(date: HTTPDate, buffer: []u8) ![]u8 {
         assert(buffer.len >= 29);
-        return try std.fmt.bufPrint(buffer, format, date);
+        return try mem.print(buffer, format, date);
     }
 
-    pub fn into_alloc(date: HTTPDate, allocator: std.mem.Allocator) ![]const u8 {
-        return try std.fmt.allocPrint(allocator, format, date);
+    /// caller `owns` returned slice and must free it
+    pub fn into_alloc(date: HTTPDate, gpa: mem.Allocator) ![]const u8 {
+        return try gpa.print(format, date);
     }
 
     pub fn into_writer(date: HTTPDate, writer: *Io.Writer) !void {
@@ -132,12 +133,13 @@ test "Parse Basic Date (Buffer)" {
 }
 
 test "Parse Basic Date (Alloc)" {
+    const gpa = testing.allocator;
     const ts = 1727464105;
     var date: Date = .init(ts);
 
     const http_date = date.to_http_date();
-    const http_string = try http_date.into_alloc(testing.allocator);
-    defer testing.allocator.free(http_string);
+    const http_string = try http_date.into_alloc(gpa);
+    defer gpa.free(http_string);
 
     try testing.expectEqualStrings(
         "Fri, 27 Sep 2024 19:08:25 GMT",
@@ -163,6 +165,7 @@ test "Parse Basic Date (Writer)" {
 }
 
 const std = @import("std");
+const mem = std.mem;
 const assert = std.debug.assert;
 const testing = std.testing;
 const Io = std.Io;

@@ -1,23 +1,23 @@
 /// Parses Form data from a request body in `x-www-form-urlencoded` format.
 pub fn Form(comptime T: type) type {
     return struct {
-        pub fn parse(allocator: mem.Allocator, ctx: *const Context) !T {
-            var m: string_map.AnyCase = .init(ctx.arena);
+        pub fn parse(ctx: *const Context) !T {
+            var form: string_map.AnyCase = .empty;
             defer {
-                var it = m.iterator();
+                var it = form.iterator();
                 while (it.next()) |entry| {
-                    allocator.free(entry.key_ptr.*);
-                    allocator.free(entry.value_ptr.*);
+                    ctx.arena.free(entry.key_ptr.*);
+                    ctx.arena.free(entry.value_ptr.*);
                 }
-                m.deinit();
+                form.deinit(ctx.arena);
             }
 
             if (ctx.request.body) |body|
-                try construct_map_from_body(allocator, &m, body)
+                try construct_map_from_body(ctx.arena, &form, body)
             else
                 return error.BodyEmpty;
 
-            return parse_struct(allocator, T, &m);
+            return parse_struct(ctx.arena, T, &form);
         }
     };
 }
@@ -25,75 +25,19 @@ pub fn Form(comptime T: type) type {
 /// Parses Form data from request URL query parameters.
 pub fn Query(comptime T: type) type {
     return struct {
-        pub fn parse(allocator: mem.Allocator, ctx: *const Context) !T {
-            return parse_struct(allocator, T, ctx.queries);
+        pub fn parse(ctx: *const Context) !T {
+            return parse_struct(ctx.arena, T, ctx.queries);
         }
-    };
-}
-
-pub fn decode_alloc(allocator: mem.Allocator, input: []const u8) ![]const u8 {
-    var list: std.ArrayList(u8) = try .initCapacity(allocator, input.len);
-    defer list.deinit(allocator);
-
-    var input_index: usize = 0;
-    while (input_index < input.len) {
-        defer input_index += 1;
-        const byte = input[input_index];
-        switch (byte) {
-            '%' => {
-                if (input_index + 2 >= input.len) return error.InvalidEncoding;
-                list.appendAssumeCapacity(
-                    try std.fmt.parseInt(
-                        u8,
-                        input[input_index + 1 .. input_index + 3],
-                        16,
-                    ),
-                );
-                input_index += 2;
-            },
-            '+' => list.appendAssumeCapacity(' '),
-            else => list.appendAssumeCapacity(byte),
-        }
-    }
-
-    return list.toOwnedSlice(allocator);
-}
-
-fn parse_from(
-    allocator: mem.Allocator,
-    comptime T: type,
-    comptime name: []const u8,
-    value: []const u8,
-) !T {
-    return switch (@typeInfo(T)) {
-        .int => |info| switch (info.signedness) {
-            .unsigned => try std.fmt.parseUnsigned(T, value, 10),
-            .signed => try std.fmt.parseInt(T, value, 10),
-        },
-        .float => try std.fmt.parseFloat(T, value),
-        .optional => |info| try parse_from(
-            allocator,
-            info.child,
-            name,
-            value,
-        ),
-        .@"enum" => std.meta.stringToEnum(T, value) orelse return error.InvalidEnumValue,
-        .bool => mem.eql(u8, value, "true"),
-        else => switch (T) {
-            []const u8 => try allocator.dupe(u8, value),
-            [:0]const u8 => try allocator.dupeSentinel(u8, value),
-            else => std.debug.panic("Unsupported field type \"{t}\"", .{T}),
-        },
     };
 }
 
 fn parse_struct(
-    allocator: mem.Allocator,
+    gpa: mem.Allocator,
     comptime T: type,
     map: *const string_map.AnyCase,
 ) !T {
     var ret: T = undefined;
-    assert(@typeInfo(T) == .@"struct");
+    debug.assert(@typeInfo(T) == .@"struct");
     const struct_info = @typeInfo(T).@"struct";
     inline for (
         struct_info.field_types,
@@ -104,7 +48,7 @@ fn parse_struct(
 
         if (entry) |e| {
             @field(ret, field_name) = try parse_from(
-                allocator,
+                gpa,
                 field_type,
                 field_name,
                 e.value_ptr.*,
@@ -119,9 +63,38 @@ fn parse_struct(
     return ret;
 }
 
+fn parse_from(
+    gpa: mem.Allocator,
+    comptime T: type,
+    comptime name: []const u8,
+    value: []const u8,
+) !T {
+    return switch (@typeInfo(T)) {
+        .int => |info| switch (info.signedness) {
+            .unsigned => try fmt.parseUnsigned(T, value, 10),
+            .signed => try fmt.parseInt(T, value, 10),
+        },
+        .float => try fmt.parseFloat(T, value),
+        .optional => |info| try parse_from(
+            gpa,
+            info.child,
+            name,
+            value,
+        ),
+        .@"enum" => std.meta.stringToEnum(T, value) orelse
+            return error.InvalidEnumValue,
+        .bool => mem.eql(u8, value, "true"),
+        else => switch (T) {
+            []const u8 => try gpa.dupe(u8, value),
+            [:0]const u8 => try gpa.dupeSentinel(u8, value),
+            else => debug.panic("Unsupported field type \"{t}\"", .{T}),
+        },
+    };
+}
+
 fn construct_map_from_body(
-    allocator: mem.Allocator,
-    m: *string_map.AnyCase,
+    gpa: mem.Allocator,
+    form: *string_map.AnyCase,
     body: []const u8,
 ) !void {
     var pairs = mem.splitScalar(u8, body, '&');
@@ -138,26 +111,57 @@ fn construct_map_from_body(
             return error.MalformedPair;
 
         const decoded_key = try decode_alloc(
-            allocator,
+            gpa,
             key,
         );
-        errdefer allocator.free(decoded_key);
+        errdefer gpa.free(decoded_key);
 
         const decoded_value = try decode_alloc(
-            allocator,
+            gpa,
             value,
         );
-        errdefer allocator.free(decoded_value);
+        errdefer gpa.free(decoded_value);
 
         // Allow for duplicates (like with the URL params),
         // The last one just takes precedent.
-        const entry = try m.getOrPut(decoded_key);
+        const entry = try form.getOrPut(
+            gpa,
+            decoded_key,
+        );
         if (entry.found_existing) {
-            allocator.free(decoded_key);
-            allocator.free(entry.value_ptr.*);
+            gpa.free(decoded_key);
+            gpa.free(entry.value_ptr.*);
         }
         entry.value_ptr.* = decoded_value;
     }
+}
+
+pub fn decode_alloc(gpa: mem.Allocator, input: []const u8) ![]const u8 {
+    var list: std.ArrayList(u8) = try .initCapacity(gpa, input.len);
+    defer list.deinit(gpa);
+
+    var input_index: usize = 0;
+    while (input_index < input.len) {
+        defer input_index += 1;
+        const byte = input[input_index];
+        switch (byte) {
+            '%' => {
+                if (input_index + 2 >= input.len) return error.InvalidEncoding;
+                list.appendAssumeCapacity(
+                    try fmt.parseInt(
+                        u8,
+                        input[input_index + 1 .. input_index + 3],
+                        16,
+                    ),
+                );
+                input_index += 2;
+            },
+            '+' => list.appendAssumeCapacity(' '),
+            else => list.appendAssumeCapacity(byte),
+        }
+    }
+
+    return list.toOwnedSlice(gpa);
 }
 
 test "FormData: Parsing from Body" {
@@ -165,19 +169,20 @@ test "FormData: Parsing from Body" {
     const User = struct { id: u32, name: []const u8, age: u8, role: UserRole };
     const body: []const u8 = "id=10&name=John&age=12&role=visitor";
 
-    var m: string_map.AnyCase = .init(testing.allocator);
+    const gpa = testing.allocator;
+    var form: string_map.AnyCase = .empty;
     defer {
-        var it = m.iterator();
+        var it = form.iterator();
         while (it.next()) |entry| {
-            testing.allocator.free(entry.key_ptr.*);
-            testing.allocator.free(entry.value_ptr.*);
+            gpa.free(entry.key_ptr.*);
+            gpa.free(entry.value_ptr.*);
         }
-        m.deinit();
+        form.deinit(gpa);
     }
-    try construct_map_from_body(testing.allocator, &m, body);
+    try construct_map_from_body(gpa, &form, body);
 
-    const parsed = try parse_struct(testing.allocator, User, &m);
-    defer testing.allocator.free(parsed.name);
+    const parsed = try parse_struct(gpa, User, &form);
+    defer gpa.free(parsed.name);
 
     try testing.expectEqual(10, parsed.id);
     try testing.expectEqualSlices(u8, "John", parsed.name);
@@ -189,38 +194,41 @@ test "FormData: Parsing Missing Fields" {
     const User = struct { id: u32, name: []const u8, age: u8 };
     const body: []const u8 = "id=10";
 
-    var m: string_map.AnyCase = .init(testing.allocator);
+    const gpa = testing.allocator;
+
+    var form: string_map.AnyCase = .empty;
     defer {
-        var it = m.iterator();
+        var it = form.iterator();
         while (it.next()) |entry| {
-            testing.allocator.free(entry.key_ptr.*);
-            testing.allocator.free(entry.value_ptr.*);
+            gpa.free(entry.key_ptr.*);
+            gpa.free(entry.value_ptr.*);
         }
-        m.deinit();
+        form.deinit(gpa);
     }
 
-    try construct_map_from_body(testing.allocator, &m, body);
+    try construct_map_from_body(gpa, &form, body);
 
-    const parsed = parse_struct(testing.allocator, User, &m);
+    const parsed = parse_struct(gpa, User, &form);
     try testing.expectError(error.FieldEmpty, parsed);
 }
 
 test "FormData: Parsing Missing Value" {
     const body: []const u8 = "abc=abc&id=";
 
-    var m: string_map.AnyCase = .init(testing.allocator);
+    const gpa = testing.allocator;
+    var form: string_map.AnyCase = .empty;
     defer {
-        var it = m.iterator();
+        var it = form.iterator();
         while (it.next()) |entry| {
-            testing.allocator.free(entry.key_ptr.*);
-            testing.allocator.free(entry.value_ptr.*);
+            gpa.free(entry.key_ptr.*);
+            gpa.free(entry.value_ptr.*);
         }
-        m.deinit();
+        form.deinit(gpa);
     }
 
     const result = construct_map_from_body(
-        testing.allocator,
-        &m,
+        gpa,
+        &form,
         body,
     );
     try testing.expectError(
@@ -231,7 +239,8 @@ test "FormData: Parsing Missing Value" {
 
 const std = @import("std");
 const mem = std.mem;
-const assert = std.debug.assert;
+const fmt = std.fmt;
+const debug = std.debug;
 const testing = std.testing;
 
 const zzz = @import("../root.zig");
