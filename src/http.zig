@@ -1,7 +1,10 @@
+const std = @import("std");
+
 pub const Context = @import("http/Context.zig");
 pub const Cookie = @import("http/Cookie.zig");
 pub const Date = @import("http/Date.zig");
 pub const form = @import("http/form.zig");
+pub const Headers = @import("http/header.zig").Headers;
 pub const Method = @import("http/method.zig").Method;
 pub const middleware = @import("http/middleware.zig");
 pub const Mime = @import("http/Mime.zig");
@@ -11,9 +14,9 @@ pub const Router = @import("http/Router.zig");
 pub const Server = @import("http/Server.zig");
 pub const SSE = @import("http/SSE.zig");
 pub const Status = @import("http/status.zig").Status;
-pub const Headers = @import("http/header.zig").Headers;
-// https://datatracker.ietf.org/doc/html/rfc3986/#section-6.2.2.1
-// Queries are case sensitive by default
+
+/// https://datatracker.ietf.org/doc/html/rfc3986/#section-6.2.2.1
+/// Queries are case sensitive by default
 pub const Queries = std.StringHashMapUnmanaged([]const u8);
 
 pub const Version = enum {
@@ -47,4 +50,6 @@ pub const Error = error{
     UnSupportedHTTPVersion,
 };
 
-const std = @import("std");
+test {
+    std.testing.refAllDecls(@This());
+}

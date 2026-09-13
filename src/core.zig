@@ -1,6 +1,6 @@
-pub const Storage = @import("core/Storage.zig");
 pub const Args = @import("core/Args.zig").Args;
 pub const Pseudoslice = @import("core/Pseudoslice.zig");
+pub const Storage = @import("core/Storage.zig");
 
 pub fn Pair(comptime A: type, comptime B: type) type {
     return struct { A, B };
@@ -40,3 +40,7 @@ pub const Size = enum(u32) {
         return @fromBackingInt(@intCast(size * kb * kb));
     }
 };
+
+test {
+    @import("std").testing.refAllDecls(@This());
+}

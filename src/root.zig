@@ -95,3 +95,7 @@ pub const Config = struct {
     /// Default: 256KiB
     recv_buffer_size: core.Size = .@"256KiB",
 };
+
+test {
+    @import("std").testing.refAllDecls(@This());
+}

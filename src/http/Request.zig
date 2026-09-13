@@ -23,11 +23,8 @@ pub fn init(gpa: mem.Allocator, header_fields_count_max: u32) OoM!Request {
 pub fn deinit(request: *Request, gpa: mem.Allocator) void {
     request.cookies.deinit(gpa);
 
-    var itr = request.headers.iterator();
-    while (itr.next()) |header| {
-        gpa.free(header.key_ptr.*);
-        gpa.free(header.value_ptr.*);
-    }
+    // Request `headers` key <-> value pair are externally managed
+    // as they come from the client's Request
     request.headers.deinit(gpa);
 }
 
@@ -72,7 +69,7 @@ pub fn parse(
     const uri = chunks.next() orelse
         return error.MalformedRequest;
 
-    if (uri.len >= options.request_uri_bytes_max.Usize())
+    if (uri.len > options.request_uri_bytes_max.Usize())
         return error.URITooLong;
 
     if (uri[0] != '/' and mem.find(u8, uri[0..4], "http") == null)
@@ -91,11 +88,11 @@ pub fn parse(
     // There shouldn't be anything else.
     if (chunks.next() != null) return error.MalformedRequest;
 
-    var total_size: usize = 0;
+    var request_size_total: usize = request_line.len;
     while (lines.next()) |header| : ({
-        total_size += header.len;
+        request_size_total += header.len;
     }) {
-        if (total_size > options.request_bytes_max.Usize())
+        if (request_size_total > options.request_bytes_max.Usize())
             return error.ContentTooLarge;
 
         // https://datatracker.ietf.org/doc/html/rfc9112#name-field-line-parsing
@@ -146,12 +143,12 @@ test "Parse Request" {
         \\Accept: text/html
     ;
 
-    var request: Request = .empty;
+    var request: Request = try .init(gpa, 4);
     defer request.deinit(gpa);
 
     try request.parse(gpa, request_header[0..], .{
-        .request_bytes_max = .KiB(1),
-        .request_uri_bytes_max = .Bytes(256),
+        .request_bytes_max = .Bytes(64),
+        .request_uri_bytes_max = .Bytes(1),
     });
 
     try testing.expectEqual(.GET, request.method);
@@ -174,27 +171,27 @@ test "Parse Request" {
 
 test "Expect ContentTooLong Error" {
     const request_text_format =
-        \\GET {s} HTTP/1.1
+        \\GET /{s} HTTP/1.1
         \\Host: localhost:9862
         \\Connection: keep-alive
         \\Accept: text/html
     ;
 
-    const large_content: [4096]u8 = @splat('a');
+    const uri: [33]u8 = @splat('a');
     const request_text = fmt.comptimePrint(
         request_text_format,
-        .{large_content},
+        .{uri},
     );
     const gpa = testing.allocator;
-    var request: Request = .empty;
+    var request: Request = try .init(gpa, 4);
     defer request.deinit(gpa);
 
     const err = request.parse(
         gpa,
         request_text[0..],
         .{
-            .request_bytes_max = .Bytes(128),
-            .request_uri_bytes_max = .Bytes(64),
+            .request_bytes_max = .Bytes(42),
+            .request_uri_bytes_max = .Bytes(34), // + /
         },
     );
     try testing.expectError(
@@ -211,21 +208,21 @@ test "Expect URITooLong Error" {
         \\Accept: text/html
     ;
 
-    const large_content: [4096]u8 = @splat('a');
+    const uri: [33]u8 = @splat('a');
     const request_text = fmt.comptimePrint(
         request_text_format,
-        .{large_content[0..]},
+        .{uri[0..]},
     );
     const gpa = testing.allocator;
-    var request: Request = .empty;
+    var request: Request = try .init(gpa, 4);
     defer request.deinit(gpa);
 
     const err = request.parse(
         gpa,
         request_text[0..],
         .{
-            .request_bytes_max = .@"1MiB",
-            .request_uri_bytes_max = .@"2KiB",
+            .request_bytes_max = .Bytes(64),
+            .request_uri_bytes_max = .Bytes(32),
         },
     );
     try testing.expectError(error.URITooLong, err);
@@ -238,21 +235,21 @@ test "Expect Malformed when URI missing /" {
         \\Connection: keep-alive
         \\Accept: text/html
     ;
-    const content: [256]u8 = @splat('a');
+    const uri: [32]u8 = @splat('a');
     const request_text = fmt.comptimePrint(
         request_text_format,
-        .{content[0..]},
+        .{uri[0..]},
     );
     const gpa = testing.allocator;
-    var request: Request = .empty;
+    var request: Request = try .init(gpa, 4);
     defer request.deinit(gpa);
 
     const err = request.parse(
         gpa,
         request_text[0..],
         .{
-            .request_bytes_max = .KiB(1),
-            .request_uri_bytes_max = .Bytes(512),
+            .request_bytes_max = .Bytes(64),
+            .request_uri_bytes_max = .Bytes(33),
         },
     );
     try testing.expectError(
@@ -270,15 +267,15 @@ test "Expect Incorrect HTTP Version" {
     ;
 
     const gpa = testing.allocator;
-    var request: Request = .empty;
+    var request: Request = try .init(gpa, 4);
     defer request.deinit(gpa);
 
-    const err = request.headers.parse(
+    const err = request.parse(
         gpa,
         request_text[0..],
         .{
-            .max_request_bytes = .KiB(1),
-            .max_uri_bytes = .Bytes(512),
+            .request_bytes_max = .Bytes(64),
+            .request_uri_bytes_max = .Bytes(1),
         },
     );
     try testing.expectError(
@@ -296,15 +293,15 @@ test "Malformed Request" {
     ;
 
     const gpa = testing.allocator;
-    var request: Request = .empty;
+    var request: Request = try .init(gpa, 4);
     defer request.deinit(gpa);
 
     const err = request.parse(
         gpa,
         request_text[0..],
         .{
-            .request_bytes_max = .KiB(1),
-            .request_uri_bytes_max = .Bytes(512),
+            .request_bytes_max = .Bytes(64),
+            .request_uri_bytes_max = .Bytes(1),
         },
     );
     try testing.expectError(
