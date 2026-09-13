@@ -33,20 +33,22 @@ pub const Config = struct {
     /// consider making this configurable
     /// https://stackoverflow.com/questions/686217/maximum-on-http-header-values
     /// Default: 8KiB
-    max_http_header_size: core.Size = .@"8KiB",
+    header_size_max: core.Size = .@"8KiB",
     /// Maximum number of header fields in a Request/Response
     /// https://datatracker.ietf.org/doc/html/rfc9110#name-field-limits
     ///
     /// Default: 32
-    max_header_fields_count: u32 = 32,
+    header_fields_count_max: u32 = 32,
     /// Maximum size (in bytes) of the Request.
+    /// https://stackoverflow.com/questions/2880722/can-http-post-be-limitless
     ///
-    /// Default: 2MiB
-    max_request_size: core.Size = .@"2MiB",
+    /// Default: 1MiB
+    request_size_max: core.Size = .@"1MiB",
     /// Maximum size (in bytes) of the Request URI.
+    /// https://stackoverflow.com/questions/417142/what-is-the-maximum-length-of-a-url-in-different-browsers
     ///
     /// Default: 2KiB
-    max_request_uri_size: core.Size = .@"2KiB",
+    request_uri_size_max: core.Size = .@"2KiB",
     /// Number of Maximum Concurrent Connections.
     ///
     /// This is applied PER runtime.
@@ -56,42 +58,40 @@ pub const Config = struct {
     /// You can set this to `null` to have no maximum.
     ///
     /// Default: `null`
-    max_connection_count: ?u32 = null,
+    connection_count_max: ?u32 = null,
     /// Maximum number of Captures in a Route
     ///
     /// Default: 8
-    max_capture_count: u16 = 8,
+    capture_count_max: u16 = 8,
     /// Number of times a Request-Response can happen with keep-alive.
     ///
     /// Setting this to `null` will set no limit.
     ///
     /// Default: `null`
-    max_keepalive_count: ?u16 = null,
-    /// Amount of allocated memory retained
-    /// after an arena is cleared.
+    keepalive_count_max: ?u16 = null,
+    /// Amount of `ctx.arena` memory retained after a
+    /// Request/Response cycle ends.
     ///
     /// A higher value will increase memory usage but
-    /// should make allocators faster.
+    /// make allocators faster.
     ///
     /// A lower value will reduce memory usage but
     /// will make allocators slower.
     ///
-    /// Default: 1MiB
-    retained_arena_bytes: core.Size = .@"1MiB",
-    /// Amount of space on the `recv_buffer` retained
-    /// after every send.
+    /// `null` retain all memory reducing the posibility of
+    /// allocating additional memory
+    ///
+    /// Default: null
+    arena_bytes_retained: ?core.Size = null,
+    /// Total size of the `zc_recv_buffer` used for handling
+    /// Request and Responds cycles.
     ///
     /// Default: 1MiB
-    retained_recv_bytes: core.Size = .@"1MiB",
-    /// Maximum size (in bytes) of the Recv buffer.
-    /// This is mainly a concern when you are reading in
-    /// large requests before responding.
+    recv_zerocopy_size: core.Size = .@"1MiB",
+    /// Size (in bytes) of the Recv buffer used per Send/Receive
+    /// This is mainly a concern when you are reading in large
+    /// requests before responding.
     ///
-    /// Default: 2MiB
-    max_recv_buffer_size: core.Size = .@"2MiB",
-    /// Size of the buffer (in bytes) used for
-    /// interacting with the socket.
-    ///
-    /// Default: 1 MiB
-    socket_buffer_size: core.Size = .@"1MiB",
+    /// Default: 256KiB
+    recv_buffer_size: core.Size = .@"256KiB",
 };
