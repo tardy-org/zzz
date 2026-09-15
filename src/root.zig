@@ -84,7 +84,9 @@ pub const Config = struct {
     /// Default: null
     arena_bytes_retained: ?core.Size = null,
     /// Total size of the `zc_recv_buffer` used for handling
-    /// Request and Responds cycles.
+    /// a complete Request and Responds cycle.
+    ///
+    /// This should be multiples of `recv_buffer_size` idealy >= 3
     ///
     /// Default: 1MiB
     recv_zerocopy_size: core.Size = .@"1MiB",

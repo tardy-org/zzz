@@ -195,4 +195,10 @@ pub const Status = enum(u16) {
     /// Interally used, will cause the thread that accepts it
     /// to gracefully shutdown.
     Kill = 999,
+
+    comptime {
+        std.debug.assert(@sizeOf(Status) == 2);
+    }
 };
+
+const std = @import("std");
