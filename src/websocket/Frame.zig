@@ -17,22 +17,41 @@ payload: []const u8,
 fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     debug.assert(payload_buf.len <= config.recv_buffer_size.Usize());
 
-    const payload_len = blk: {
-        break :blk if (option.status) |_|
+    const payload_len, const payload_category = blk: {
+        const len = if (option.status) |_|
             option.message.len + @sizeOf(http.Status)
         else
             option.message.len;
+
+        const category: u7 = if (len <= 125)
+            @intCast(len)
+        else if (len < 1024 * 64) 126 else 127;
+
+        break :blk .{ len, category };
     };
+
+    const min_buf_size = blk: {
+        var size = option.message.len;
+        if (option.status) |_| size += @sizeOf(http.Status);
+        if (option.masking_key) |_| size += @sizeOf(MaskingKey);
+        switch (payload_category) {
+            126 => size += @sizeOf(u16),
+            127 => size += @sizeOf(u64),
+            else => {},
+        }
+        break :blk size;
+    };
+    debug.assert(payload_buf.len >= min_buf_size);
 
     const header: Header = .{
         .fin = option.fin,
         .mask = if (option.masking_key) |_| true else false,
         .opcode = option.opcode,
-        .payload_len = if (payload_len <= 125) @intCast(payload_len) else 0,
+        .payload_len = payload_category,
     };
 
     var payload_index: usize = 0;
-    switch (payload_len) {
+    switch (payload_category) {
         126 => {
             const size = @sizeOf(u16);
             defer payload_index += size;
@@ -109,11 +128,19 @@ fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
         }
     }
 
-    // payload length does NOT include the length of the masking key
-    if (option.masking_key) |_|
-        debug.assert(payload_index - @sizeOf(MaskingKey) == payload_len)
-    else
-        debug.assert(payload_index == payload_len);
+    {
+        var index = payload_index;
+        // payload length does NOT include the length of the masking key
+        if (option.masking_key) |_|
+            index -= @sizeOf(MaskingKey);
+
+        switch (payload_category) {
+            126 => index -= @sizeOf(u16),
+            127 => index -= @sizeOf(u64),
+            else => {},
+        }
+        debug.assert(index == payload_len);
+    }
 
     const new: Frame = .{
         .header = header,
@@ -143,24 +170,24 @@ fn payloadLen(frame: *const Frame) usize {
     }
 }
 
-fn maskKey(frame: *const Frame) ?u32 {
-    const mask_size = @sizeOf(u32);
+fn maskKey(frame: *const Frame) ?MaskingKey {
+    const mask_size = @sizeOf(MaskingKey);
     if (frame.header.mask) switch (frame.header.payload_len) {
         0...125 => {
             const mask_pl = frame.payload[0..mask_size];
-            const value = mem.readInt(u32, mask_pl, .big);
+            const value = mem.readInt(MaskingKey, mask_pl, .big);
             return value;
         },
         126 => {
             const extended_len = @sizeOf(u16);
             const mask_pl = frame.payload[0..extended_len][0..mask_size];
-            const value = mem.readInt(u32, mask_pl, .big);
+            const value = mem.readInt(MaskingKey, mask_pl, .big);
             return value;
         },
         127 => {
             const extended_len = @sizeOf(u64);
             const mask_pl = frame.payload[0..extended_len][0..mask_size];
-            const value = mem.readInt(u32, mask_pl, .big);
+            const value = mem.readInt(MaskingKey, mask_pl, .big);
             return value;
         },
     };
@@ -168,7 +195,7 @@ fn maskKey(frame: *const Frame) ?u32 {
 }
 
 fn payloadData(frame: *const Frame) []const u8 {
-    const mask_len = @sizeOf(u32);
+    const mask_len = @sizeOf(MaskingKey);
     switch (frame.header.payload_len) {
         0...125 => {
             if (frame.header.mask) return frame.payload[mask_len..][0..];
@@ -194,11 +221,8 @@ pub fn format(
     w: *std.Io.Writer,
 ) std.Io.Writer.Error!void {
     try w.print("direct: {any}\n", .{frame});
-
-    const header: [2]u8 = switch (endian) {
-        .little => @bitCast(@byteSwap(@backingInt(frame.header))),
-        .big => @bitCast(frame.header),
-    };
+    const raw = @backingInt(frame.header);
+    const header: [2]u8 = toBytes(@TypeOf(raw), raw);
 
     const hex = struct {
         fn hex(w_: *std.Io.Writer, loads: []const u8) void {
@@ -217,10 +241,7 @@ pub fn format(
     try w.writeByte('\n');
 
     try w.writeAll("\nExtended Payload length\n");
-
     var index: usize = 0;
-
-    // Payload length
     switch (frame.header.payload_len) {
         0...125 => {},
         126 => {
@@ -239,14 +260,12 @@ pub fn format(
 
     if (frame.header.mask) {
         try w.writeAll("\nMasking length\n");
-        // Masking length
-        const mask_size = @sizeOf(u32);
+        const mask_size = @sizeOf(MaskingKey);
         defer index += mask_size;
 
         hex(w, frame.payload[index..][0..mask_size]);
     }
 
-    // Payload
     try w.writeAll("\n\nPayload\n");
     const payload = frame.payload[index..];
     try w.print("0x{X}", .{payload[0..]});
@@ -255,15 +274,12 @@ pub fn format(
 test format {
     const msg = "Hello";
 
-    var payload_buf: [5]u8 = undefined;
+    var payload_buf: [msg.len]u8 = undefined;
     const texting = text(
         &payload_buf,
         msg,
         .{},
     );
-
-    var fmt_buf: [260]u8 = undefined;
-    const actual = try mem.print(&fmt_buf, "Pretty:\n{f}", .{texting});
 
     const expected =
         \\Pretty:
@@ -282,6 +298,11 @@ test format {
         \\0x48656C6C6F
     ;
 
+    var fmt_buf: [expected.len]u8 = undefined;
+    const actual = try mem.print(&fmt_buf, "Pretty:\n{f}", .{
+        texting,
+    });
+
     try testing.expectEqualStrings(expected[0..], actual[0..]);
 }
 
@@ -290,6 +311,7 @@ pub fn bytes(frame: *const Frame, buf: []u8) []const u8 {
     const header: [2]u8 = toBytes(@TypeOf(raw), raw);
 
     var buf_index: usize = 0;
+    // Header
     {
         defer buf_index += @sizeOf(Header);
         @memcpy(buf[0..header.len], header[0..]);
@@ -321,8 +343,8 @@ pub fn bytes(frame: *const Frame, buf: []u8) []const u8 {
         },
     }
 
+    // Masking length
     if (frame.header.mask) {
-        // Masking length
         const mask_size = @sizeOf(MaskingKey);
         defer buf_index += mask_size;
         defer payload_index += mask_size;
@@ -412,7 +434,7 @@ pub fn ping(payload_buf: []u8, reason: []const u8) Frame {
     debug.assert(reason.len <= Opcode.control_frame_payload_size_max);
 
     const pinging: Frame = .init(payload_buf, .{
-        .fin = false,
+        .fin = true,
         .opcode = .ping,
         .message = reason,
     }, .{});
@@ -420,26 +442,103 @@ pub fn ping(payload_buf: []u8, reason: []const u8) Frame {
     return pinging;
 }
 
-pub fn binary(payload_buf: []u8, data: []const u8, config: zzz.Config) Frame {
-    const bin: Frame = .init(payload_buf, .{
-        .fin = false,
-        .opcode = .binary,
-        .message = data,
-    }, config);
+test ping {
+    const msg = "Hello";
 
-    return bin;
+    var ping_buf: [msg.len]u8 = undefined;
+    // unmasked server ping with `msg`
+    const pinging = ping(&ping_buf, msg);
+
+    const expected: [7]u8 = .{ 0x89, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f };
+
+    var protocol_wire_buf: [expected.len]u8 = undefined;
+    const actual = pinging.bytes(&protocol_wire_buf);
+
+    try testing.expectEqualSlices(u8, expected[0..], actual);
 }
 
 pub fn pong(payload_buf: []u8, reason: []const u8) Frame {
     debug.assert(reason.len <= Opcode.control_frame_payload_size_max);
 
     const ponging: Frame = .init(payload_buf, .{
-        .fin = false,
-        .opcode = .ping,
+        .fin = true,
+        .opcode = .pong,
         .message = reason,
     }, .{});
 
     return ponging;
+}
+
+test pong {
+    const msg = "Hello";
+
+    // masked Pong response from client
+    var ping_buf: [@sizeOf(MaskingKey) + msg.len]u8 = undefined;
+    const pinging: Frame = .init(&ping_buf, .{
+        .fin = true,
+        .opcode = .pong,
+        .masking_key = 0x37_FA_21_3D,
+        .message = msg,
+    }, .{});
+
+    const expected: [11]u8 = .{
+        0x8a, 0x85, // Header
+        0x37, 0xfa, 0x21, 0x3d, // MaskingKey
+        0x7f, 0x9f, 0x4d, 0x51, 0x58, // Payload
+    };
+
+    var protocol_wire_buf: [expected.len]u8 = undefined;
+    const actual = pinging.bytes(&protocol_wire_buf);
+
+    try testing.expectEqualSlices(u8, expected[0..], actual);
+}
+
+pub fn binary(payload_buf: []u8, data: []const u8) Frame {
+    const bin: Frame = .init(payload_buf, .{
+        .fin = true,
+        .opcode = .binary,
+        .message = data,
+    }, .{});
+
+    return bin;
+}
+
+test binary {
+    // 256 bytes binary message in a single unmasked frame
+    {
+        const msg: [256]u8 = @splat(0);
+
+        var bin_buf: [@sizeOf(u16) + msg.len]u8 = undefined;
+        const binary_frame = binary(&bin_buf, msg[0..]);
+
+        const expected: [@sizeOf(Header) + @sizeOf(u16) + msg.len]u8 = .{
+            0x82, 0x7E, // Header
+            0x01, 0x00, // u16 Extended payload len
+        } ++ msg;
+
+        var protocol_wire_buf: [expected.len]u8 = undefined;
+        const actual = binary_frame.bytes(&protocol_wire_buf);
+
+        try testing.expectEqualSlices(u8, expected[0..], actual);
+    }
+
+    // 64KiB binary message in a single unmasked frame
+    {
+        const msg: [64 * 1024]u8 = @splat(0);
+
+        var bin_buf: [@sizeOf(u64) + msg.len]u8 = undefined;
+        const binary_frame = binary(&bin_buf, msg[0..]);
+
+        const expected: [@sizeOf(Header) + @sizeOf(u64) + msg.len]u8 = .{
+            0x82, 0x7F, // Header
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, // u64 Extended payload len
+        } ++ msg;
+
+        var protocol_wire_buf: [expected.len]u8 = undefined;
+        const actual = binary_frame.bytes(&protocol_wire_buf);
+
+        try testing.expectEqualSlices(u8, expected[0..], actual);
+    }
 }
 
 pub fn close(payload_buf: []u8, status: http.Status, reason: []const u8) Frame {
@@ -455,11 +554,11 @@ pub fn close(payload_buf: []u8, status: http.Status, reason: []const u8) Frame {
     return closing;
 }
 
-fn mask(buf: []u8, payload: []const u8, key: u32) []const u8 {
+fn mask(buf: []u8, payload: []const u8, key: MaskingKey) []const u8 {
     return unmask(buf, payload, key);
 }
 
-fn unmask(buf: []u8, masked_pl: []const u8, key: u32) []const u8 {
+fn unmask(buf: []u8, masked_pl: []const u8, key: MaskingKey) []const u8 {
     debug.assert(buf.len >= masked_pl.len);
 
     const key_bytes: [4]u8 = toBytes(@TypeOf(key), key);
@@ -541,7 +640,7 @@ const Option = struct {
     fin: bool,
     opcode: Opcode,
     /// must never be set by server response
-    masking_key: ?u32 = null,
+    masking_key: ?MaskingKey = null,
     status: ?http.Status = null,
     message: []const u8,
 };

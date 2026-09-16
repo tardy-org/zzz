@@ -48,7 +48,7 @@ pub fn build(b: *Build) void {
     });
 
     const unit_tests = b.addTest(.{
-        .name = "Zzz Unit tests",
+        .name = "'Zzz Unit tests'",
         .root_module = zzz,
     });
 
