@@ -17,7 +17,7 @@ payload: []const u8,
 fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     debug.assert(payload_buf.len <= config.recv_buffer_size.Usize());
 
-    const payload_len, const payload_category = blk: {
+    const payload_size, const payload_category = blk: {
         const len = if (option.status) |_|
             option.message.len + @sizeOf(http.Status)
         else
@@ -50,27 +50,27 @@ fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
         .payload_len = payload_category,
     };
 
-    var payload_index: usize = 0;
+    var payload_len: usize = 0;
     switch (payload_category) {
         126 => {
             const size = @sizeOf(u16);
-            defer payload_index += size;
+            defer payload_len += size;
 
             mem.writeInt(
                 u16,
                 payload_buf[0..size],
-                @intCast(payload_len),
+                @intCast(payload_size),
                 .big,
             );
         },
         127 => {
             const size = @sizeOf(u64);
-            defer payload_index += size;
+            defer payload_len += size;
 
             mem.writeInt(
                 u64,
                 payload_buf[0..size],
-                payload_len,
+                payload_size,
                 .big,
             );
         },
@@ -81,7 +81,7 @@ fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     // client masking functionality
     if (option.masking_key) |masking_key| {
         const size = @sizeOf(MaskingKey);
-        defer payload_index += size;
+        defer payload_len += size;
 
         mem.writeInt(
             MaskingKey,
@@ -94,9 +94,9 @@ fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     // start of application payload
     if (option.status) |status| {
         const status_size = @sizeOf(http.Status); // 2 bytes
-        defer payload_index += status_size;
+        defer payload_len += status_size;
 
-        const status_data = payload_buf[payload_index..];
+        const status_data = payload_buf[payload_len..];
         mem.writeInt(
             @typeInfo(http.Status).@"enum".tag_type,
             status_data[0..status_size],
@@ -114,8 +114,8 @@ fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     }
 
     {
-        const application_data = payload_buf[payload_index..];
-        defer payload_index += option.message.len;
+        const application_data = payload_buf[payload_len..];
+        defer payload_len += option.message.len;
 
         @memcpy(application_data[0..option.message.len], option.message);
 
@@ -129,24 +129,24 @@ fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     }
 
     {
-        var index = payload_index;
+        var total_size = payload_len;
         // payload length does NOT include the length of the masking key
         if (option.masking_key) |_|
-            index -= @sizeOf(MaskingKey);
+            total_size -= @sizeOf(MaskingKey);
 
         switch (payload_category) {
-            126 => index -= @sizeOf(u16),
-            127 => index -= @sizeOf(u64),
+            126 => total_size -= @sizeOf(u16),
+            127 => total_size -= @sizeOf(u64),
             else => {},
         }
-        debug.assert(index == payload_len);
+        debug.assert(total_size == payload_size);
     }
 
     const new: Frame = .{
         .header = header,
         // we use `payload_index` because `payload_len` doesn't account
         // for the potential `masking_key` in the `payload` bytes
-        .payload = payload_buf[0..payload_index],
+        .payload = payload_buf[0..payload_len],
     };
 
     return new;
@@ -554,6 +554,110 @@ pub fn close(payload_buf: []u8, status: http.Status, reason: []const u8) Frame {
     return closing;
 }
 
+pub const Fragment = struct {
+    pub fn start(payload_buf: []u8, opcode: Opcode, data: []const u8) Frame {
+        debug.assert(opcode != .continuation);
+
+        const frame: Frame = .init(payload_buf, .{
+            .fin = false,
+            .opcode = opcode,
+            .status = null,
+            .message = data,
+        }, .{});
+
+        return frame;
+    }
+
+    pub fn @"continue"(payload_buf: []u8, data: []const u8) Frame {
+        const frame: Frame = .init(payload_buf, .{
+            .fin = false,
+            .opcode = .continuation,
+            .status = null,
+            .message = data,
+        }, .{});
+
+        return frame;
+    }
+
+    pub fn end(payload_buf: []u8, data: []const u8) Frame {
+        const frame: Frame = .init(payload_buf, .{
+            .fin = true,
+            .opcode = .continuation,
+            .status = null,
+            .message = data,
+        }, .{});
+
+        return frame;
+    }
+
+    // A fragmented unmasked text message
+    test Fragment {
+        {
+            const msg = "Hel";
+
+            var payload_buf: [msg.len]u8 = undefined;
+            const frame = start(
+                &payload_buf,
+                .text,
+                msg,
+            );
+
+            const expected: [5]u8 = .{ 0x01, 0x03, 0x48, 0x65, 0x6c };
+
+            var protocol_wire_buf: [expected.len]u8 = undefined;
+            const actual = frame.bytes(&protocol_wire_buf);
+
+            try testing.expectEqualSlices(
+                u8,
+                expected[0..],
+                actual,
+            );
+        }
+
+        {
+            const msg = "lo";
+
+            var payload_buf: [msg.len]u8 = undefined;
+            const frame = @"continue"(
+                &payload_buf,
+                msg,
+            );
+
+            const expected: [4]u8 = .{ 0x00, 0x02, 0x6c, 0x6f };
+
+            var protocol_wire_buf: [expected.len]u8 = undefined;
+            const actual = frame.bytes(&protocol_wire_buf);
+
+            try testing.expectEqualSlices(
+                u8,
+                expected[0..],
+                actual,
+            );
+        }
+
+        {
+            const msg = "done";
+
+            var payload_buf: [msg.len]u8 = undefined;
+            const frame = end(
+                &payload_buf,
+                msg,
+            );
+
+            const expected: [6]u8 = .{ 0x80, 0x04, 0x64, 0x6f, 0x6e, 0x65 };
+
+            var protocol_wire_buf: [expected.len]u8 = undefined;
+            const actual = frame.bytes(&protocol_wire_buf);
+
+            try testing.expectEqualSlices(
+                u8,
+                expected[0..],
+                actual,
+            );
+        }
+    }
+};
+
 fn mask(buf: []u8, payload: []const u8, key: MaskingKey) []const u8 {
     return unmask(buf, payload, key);
 }
@@ -647,13 +751,18 @@ const Option = struct {
 
 const MaskingKey = u32;
 
-const std = @import("std");
+test {
+    std.testing.refAllDecls(@This());
+}
+
 const log = std.log.scoped(.@"websocket/framing");
+const endian = builtin.target.cpu.arch.endian();
+
+const std = @import("std");
 const debug = std.debug;
 const mem = std.mem;
 const testing = std.testing;
 const builtin = @import("builtin");
-const endian = builtin.target.cpu.arch.endian();
 
 const zzz = @import("zzz");
 const http = zzz.http;
