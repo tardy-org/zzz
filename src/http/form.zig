@@ -2,18 +2,11 @@
 pub fn Form(comptime T: type) type {
     return struct {
         pub fn parse(ctx: *const Context) !T {
-            var form: Value = .empty;
-            defer {
-                var it = form.iterator();
-                while (it.next()) |entry| {
-                    ctx.arena.free(entry.key_ptr.*);
-                    ctx.arena.free(entry.value_ptr.*);
-                }
-                form.deinit(ctx.arena);
-            }
+            var form: UrlEncoded = .empty;
+            form.deinit(ctx.arena);
 
             if (ctx.request.body) |body|
-                try construct_map_from_body(ctx.arena, &form, body)
+                try urlEncoded(ctx.arena, &form, body)
             else
                 return error.BodyEmpty;
 
@@ -34,7 +27,7 @@ pub fn Query(comptime T: type) type {
 fn parse_struct(
     gpa: mem.Allocator,
     comptime T: type,
-    form: *const Value,
+    form: *const UrlEncoded,
 ) !T {
     var ret: T = undefined;
     debug.assert(@typeInfo(T) == .@"struct");
@@ -44,7 +37,7 @@ fn parse_struct(
         struct_info.field_names,
         struct_info.field_attrs,
     ) |field_type, field_name, field_attrs| {
-        const entry = form.getEntry(field_name);
+        const entry = form.map.getEntry(field_name);
 
         if (entry) |e| {
             @field(ret, field_name) = try parse_from(
@@ -92,138 +85,30 @@ fn parse_from(
     };
 }
 
-fn construct_map_from_body(
+/// https://url.spec.whatwg.org/#urlencoded-parsing
+fn urlEncoded(
     gpa: mem.Allocator,
-    form: *Value,
+    form: *UrlEncoded,
     body: []const u8,
 ) !void {
-    var pairs = mem.splitScalar(u8, body, '&');
-
-    while (pairs.next()) |pair| {
-        const field_idx = mem.findScalar(u8, pair, '=') orelse
-            return error.MissingSeperator;
-        if (pair.len < field_idx + 2) return error.MissingValue;
-
-        const key = pair[0..field_idx];
-        const value = pair[(field_idx + 1)..];
-
-        if (mem.findScalar(u8, value, '=') != null)
-            return error.MalformedPair;
-
-        const decoded_key = try percentDecode(
-            gpa,
-            key,
-        );
-        errdefer gpa.free(decoded_key);
-
-        const decoded_value = try percentDecode(
-            gpa,
-            value,
-        );
-        errdefer gpa.free(decoded_value);
-
-        // Allow for duplicates (like with the URL params),
-        // The last one just takes precedent.
-        const entry = try form.getOrPut(
-            gpa,
-            decoded_key,
-        );
-        if (entry.found_existing) {
-            gpa.free(decoded_key);
-            gpa.free(entry.value_ptr.*);
-        }
-        entry.value_ptr.* = decoded_value;
-    }
-}
-
-/// https://url.spec.whatwg.org/#percent-decode
-/// Caller owns the returned memory and must free it
-pub fn percentDecode(gpa: mem.Allocator, input: []const u8) ![]const u8 {
-    var list: std.ArrayList(u8) = try .initCapacity(gpa, input.len);
-    defer list.deinit(gpa);
-
-    var input_index: usize = 0;
-    while (input_index < input.len) : (input_index += 1) {
-        const byte = input[input_index];
-        switch (byte) {
-            '%' => {
-                const hex_bytes_size = 2;
-                debug.assert(input_index + hex_bytes_size < input.len);
-
-                const next_hex =
-                    input[input_index + 1 ..][0..hex_bytes_size];
-
-                switch (next_hex[0]) {
-                    // 0...9, A...F, a...f
-                    0x30...0x39, 0x41...0x46, 0x61...0x66 => {
-                        switch (next_hex[1]) {
-                            0x30...0x39, 0x41...0x46, 0x61...0x66 => {
-                                const next_byte = try fmt.parseInt(
-                                    u8,
-                                    next_hex,
-                                    16,
-                                );
-                                defer input_index += hex_bytes_size;
-
-                                list.appendAssumeCapacity(next_byte);
-                            },
-                            else => {
-                                list.appendAssumeCapacity(byte);
-                            },
-                        }
-                    },
-                    else => {
-                        list.appendAssumeCapacity(byte);
-                    },
-                }
-            },
-            '+' => list.appendAssumeCapacity(' '),
-            else => list.appendAssumeCapacity(byte),
-        }
-    }
-
-    try list.shrinkToLen(gpa);
-
-    return list.toOwnedSliceAssert();
-}
-
-test percentDecode {
-    const gpa = testing.allocator;
-
-    const inputs: [2]struct { []const u8, []const u8 } = .{
-        .{ "%25%s%1G", "%%s%1G" },
-        .{ "‽%25%2E", &.{ 0xE2, 0x80, 0xBD, 0x25, 0x2E } },
-    };
-
-    for (inputs) |tests_values| {
-        const input, const expected = tests_values;
-        const actual = try percentDecode(gpa, input);
-        defer gpa.free(actual);
-
-        try testing.expectEqualSlices(u8, expected[0..], actual);
-    }
+    try form.urlDecoding(gpa, body);
 }
 
 // https://datatracker.ietf.org/doc/html/rfc1866#section-8.2.1
 // Casing not explicitly stated so keep key as-is
-const Value = std.StringHashMapUnmanaged([]const u8);
+const UrlEncoded = http.Queries;
 
 test "FormData: Parsing from Body" {
+    const gpa = testing.allocator;
+
     const UserRole = enum { admin, visitor };
     const User = struct { id: u32, name: []const u8, age: u8, role: UserRole };
     const body: []const u8 = "id=10&name=John&age=12&role=visitor";
 
-    const gpa = testing.allocator;
-    var form: Value = .empty;
-    defer {
-        var it = form.iterator();
-        while (it.next()) |entry| {
-            gpa.free(entry.key_ptr.*);
-            gpa.free(entry.value_ptr.*);
-        }
-        form.deinit(gpa);
-    }
-    try construct_map_from_body(gpa, &form, body);
+    var form: UrlEncoded = .empty;
+    defer form.deinit(gpa);
+
+    try urlEncoded(gpa, &form, body);
 
     const parsed = try parse_struct(gpa, User, &form);
     defer gpa.free(parsed.name);
@@ -235,46 +120,37 @@ test "FormData: Parsing from Body" {
 }
 
 test "FormData: Parsing Missing Fields" {
+    const gpa = testing.allocator;
+
     const User = struct { id: u32, name: []const u8, age: u8 };
     const body: []const u8 = "id=10";
 
-    const gpa = testing.allocator;
+    var form: UrlEncoded = .empty;
+    defer form.deinit(gpa);
 
-    var form: Value = .empty;
-    defer {
-        var it = form.iterator();
-        while (it.next()) |entry| {
-            gpa.free(entry.key_ptr.*);
-            gpa.free(entry.value_ptr.*);
-        }
-        form.deinit(gpa);
-    }
-
-    try construct_map_from_body(gpa, &form, body);
+    try urlEncoded(gpa, &form, body);
 
     const parsed = parse_struct(gpa, User, &form);
-    try testing.expectError(error.FieldEmpty, parsed);
+    try testing.expectError(
+        error.FieldEmpty,
+        parsed,
+    );
 }
 
 test "FormData: Parsing Missing Value" {
+    const gpa = testing.allocator;
+
+    var form: UrlEncoded = .empty;
+    defer form.deinit(gpa);
+
     const body: []const u8 = "abc=abc&id=";
 
-    const gpa = testing.allocator;
-    var form: Value = .empty;
-    defer {
-        var it = form.iterator();
-        while (it.next()) |entry| {
-            gpa.free(entry.key_ptr.*);
-            gpa.free(entry.value_ptr.*);
-        }
-        form.deinit(gpa);
-    }
-
-    const result = construct_map_from_body(
+    const result = urlEncoded(
         gpa,
         &form,
         body,
     );
+
     try testing.expectError(
         error.MissingValue,
         result,
@@ -288,4 +164,5 @@ const debug = std.debug;
 const testing = std.testing;
 
 const zzz = @import("zzz");
+const http = zzz.http;
 const Context = @import("Context.zig");

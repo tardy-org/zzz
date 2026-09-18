@@ -160,7 +160,7 @@ pub fn bundle(
     }
 
     if (query_pos) |pos| {
-        try urlDecoding(gpa, path[pos + 1 ..], queries);
+        try queries.urlDecoding(gpa, path[pos + 1 ..]);
     }
 
     return .{
@@ -168,63 +168,6 @@ pub fn bundle(
         .captures = captures[0..capture_idx],
         .queries = queries,
     };
-}
-
-// https://url.spec.whatwg.org/#urlencoded-parsing
-fn urlDecoding(
-    gpa: mem.Allocator,
-    url: []const u8,
-    queries: *http.Queries,
-) !void {
-    if (url.len == 0) return;
-    debug.assert(url[0] != '?');
-
-    var query_iter = mem.tokenizeScalar(
-        u8,
-        url[0..],
-        '&',
-    );
-
-    var arena_alloc = queries.arena_state.promote(gpa);
-    const arena = arena_alloc.allocator();
-
-    while (query_iter.next()) |chunk| {
-        const field_idx = mem.findScalar(
-            u8,
-            chunk,
-            '=',
-        ) orelse return error.MissingValue;
-
-        const hex_bytes_size = 2;
-        if (chunk.len < field_idx + hex_bytes_size) return error.MissingValue;
-
-        const key = chunk[0..field_idx];
-        const value = chunk[(field_idx + 1)..];
-
-        if (mem.findScalar(u8, value, '=') != null)
-            return error.MalformedPair;
-
-        const decoded_key, const decoded_value = blk: {
-            // Update `arena_state` here to ensure we don't lose track of any
-            // of the allocations below since `queries.put` also modifies the state
-            defer queries.arena_state = arena_alloc.state;
-
-            const decoded_key = try form.percentDecode(
-                arena,
-                key,
-            );
-
-            const decoded_value = try form.percentDecode(
-                arena,
-                value,
-            );
-
-            break :blk .{ decoded_key, decoded_value };
-        };
-
-        // Later values will clobber earlier ones.
-        try queries.put(gpa, decoded_key, decoded_value);
-    }
 }
 
 fn TokenHashMap(comptime V: type) type {

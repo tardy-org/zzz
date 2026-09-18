@@ -47,6 +47,69 @@ pub fn get(
     return queries.map.get(key);
 }
 
+/// https://url.spec.whatwg.org/#urlencoded-parsing
+pub fn urlDecoding(
+    queries: *Queries,
+    gpa: mem.Allocator,
+    url: []const u8,
+) !void {
+    if (url.len == 0) return;
+    debug.assert(url[0] != '?');
+
+    var iter = mem.tokenizeScalar(
+        u8,
+        url[0..],
+        '&',
+    );
+
+    var arena_alloc = queries.arena_state.promote(gpa);
+    const arena = arena_alloc.allocator();
+
+    while (iter.next()) |key_value| {
+        const split_idx = mem.findScalar(
+            u8,
+            key_value,
+            '=',
+        ) orelse return error.MissingValue;
+
+        const hex_bytes_size = 2;
+        if (key_value.len < split_idx + hex_bytes_size) return error.MissingValue;
+
+        const key = key_value[0..split_idx];
+        const value = key_value[(split_idx + 1)..];
+
+        if (mem.findScalar(u8, value, '=') != null)
+            return error.MalformedPair;
+
+        const decoded_key, const decoded_value = blk: {
+            // Update `arena_state` here to ensure we don't lose track of any
+            // of the allocations below since `queries.put` also modifies the state
+            defer queries.arena_state = arena_alloc.state;
+
+            const decoded_key = try http.percentDecode(
+                arena,
+                key,
+            );
+            errdefer arena.free(decoded_key);
+
+            const decoded_value = try http.percentDecode(
+                arena,
+                value,
+            );
+            errdefer arena.free(decoded_value);
+
+            break :blk .{ decoded_key, decoded_value };
+        };
+
+        // Later values will clobber earlier ones.
+        try queries.put(gpa, decoded_key, decoded_value);
+    }
+}
+
 const std = @import("std");
 const mem = std.mem;
+const debug = std.debug;
 const ArenaAllocator = std.heap.ArenaAllocator;
+
+const zzz = @import("zzz");
+const http = zzz.http;
