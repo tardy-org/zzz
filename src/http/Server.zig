@@ -10,15 +10,7 @@ fn deinit(gpa: mem.Allocator, provisions: *pool.Pool(Provision)) void {
     for (provisions.items) |*provision| {
         provision.initalized = false;
 
-        {
-            var itr = provision.queries.iterator();
-            defer provision.queries.deinit(gpa);
-            while (itr.next()) |query| {
-                gpa.free(query.key_ptr.*);
-                gpa.free(query.value_ptr.*);
-            }
-        }
-
+        provision.queries.deinit(gpa);
         provision.storage.deinit(gpa);
         provision.request.deinit(gpa);
         provision.response.deinit(gpa);
@@ -234,6 +226,8 @@ pub fn mainLoop(
                 if (provision.request.expect_body() and content_length != 0) state = .{
                     .request = .{
                         .body = .{
+                            // TODO: this seems like a vestiage for the past
+                            // investigate and remove it if found not useful
                             .current_length = provision.zc_recv_buffer.len - end,
                             .content_length = content_length,
                         },
@@ -287,10 +281,8 @@ pub fn mainLoop(
                 provision.captures,
                 &provision.queries,
             );
-            defer rt.gpa.free(found.duped);
-            defer for (found.duped) |dupe| rt.gpa.free(dupe);
 
-            const h_with_data: Route.Handler.WithData = found.route.get_handler(
+            const h_with_data: Route.Handler.WithData = found.route.handler(
                 provision.request.method.?,
             ) orelse {
                 provision.response.headers.clearRetainingCapacity();
@@ -499,6 +491,7 @@ fn clearProvision(gpa: mem.Allocator, provision: *Provision, config: zzz.Config)
     debug.assert(provision.initalized);
     provision.request.clear(gpa);
     provision.response.clear();
+    provision.queries.clear(gpa);
     provision.storage.clear(gpa);
     provision.zc_recv_buffer.clear_retaining_capacity();
     _ = provision.header_writer.consumeAll();

@@ -4,7 +4,7 @@ pub const Route = @This();
 /// Defined route path.
 path: []const u8,
 /// Route Handlers.
-handlers: [9]?Handler.WithData = @splat(null),
+handlers: [http.Method.count]?Handler.WithData = @splat(null),
 
 /// Initialize a route for the given path.
 pub fn init(path: []const u8) Route {
@@ -13,7 +13,7 @@ pub fn init(path: []const u8) Route {
 
 /// Returns a comma delinated list of allowed Methods for this route. This
 /// is meant to be used as the value for the 'Allow' header in the Response.
-pub fn get_allowed(route: Route, gpa: mem.Allocator) ![]const u8 {
+pub fn allowed(route: Route, gpa: mem.Allocator) ![]const u8 {
     // This gets allocated within the context of the connection's arena.
     const allowed_size = comptime blk: {
         var size = 0;
@@ -44,7 +44,7 @@ pub fn get_allowed(route: Route, gpa: mem.Allocator) ![]const u8 {
 
 /// Get a defined request handler for the provided method.
 /// Return NULL if no handler is defined for this method.
-pub fn get_handler(route: Route, method: http.Method) ?Handler.WithData {
+pub fn handler(route: Route, method: http.Method) ?Handler.WithData {
     return route.handlers[@backingInt(method)];
 }
 
@@ -62,7 +62,7 @@ inline fn create(
     const arg: core.Args = .init(args);
     var new_handlers = route.handlers;
     new_handlers[comptime @backingInt(method)] = .{
-        .handler_fn = @ptrCast(
+        .func = @ptrCast(
             handler_fn,
         ),
         .middlewares = &.{},
@@ -86,7 +86,7 @@ pub fn all(
 
     for (&new_handlers) |*new_handler| {
         new_handler.* = .{
-            .handler_fn = @ptrCast(
+            .func = @ptrCast(
                 handler_fn,
             ),
             .middlewares = &.{},
@@ -173,7 +173,7 @@ pub fn patch(
 }
 
 /// Define a GET handler to serve an embedded file.
-pub fn embed_file(
+pub fn embedFile(
     route: *const Route,
     comptime opts: EmbeddedOptions,
     comptime bytes: []const u8,
@@ -243,10 +243,11 @@ pub const Handler = struct {
     ) anyerror!http.Respond;
 
     pub const WithData = struct {
-        middlewares: []const Middleware.WithData,
-        handler_fn: Handler.Fn,
+        func: Handler.Fn,
         args: core.Args,
+        middlewares: []const Middleware.WithData,
     };
+
     pub fn TypedFn(comptime T: type) type {
         return *const fn (*const http.Context, T) anyerror!http.Respond;
     }
@@ -271,4 +272,5 @@ const builtin = @import("builtin");
 const zzz = @import("zzz");
 const http = zzz.http;
 const core = zzz.core;
+
 const Middleware = @import("Middleware.zig");

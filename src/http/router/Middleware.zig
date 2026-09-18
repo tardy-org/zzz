@@ -32,7 +32,7 @@ pub const Next = struct {
             const middleware = next.middlewares[0];
             next.middlewares = next.middlewares[1..];
             return try middleware.func(next, middleware.args);
-        } else return try next.handler.handler_fn(next.ctx, next.handler.args);
+        } else return try next.handler.func(next.ctx, next.handler.args);
     }
 };
 

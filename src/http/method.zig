@@ -9,6 +9,8 @@ pub const Method = enum(u8) {
     TRACE = 7,
     PATCH = 8,
 
+    pub const count = 9;
+
     pub fn parse(method: []const u8) !Method {
         debug.assert(method.len != 0);
         const encode = meta.stringToEnum(Method, method);

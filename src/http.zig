@@ -14,10 +14,7 @@ pub const Router = @import("http/Router.zig");
 pub const Server = @import("http/Server.zig");
 pub const SSE = @import("http/SSE.zig");
 pub const Status = @import("http/status.zig").Status;
-
-/// https://datatracker.ietf.org/doc/html/rfc3986/#section-6.2.2.1
-/// Queries are case sensitive by default
-pub const Queries = std.StringHashMapUnmanaged([]const u8);
+pub const Queries = @import("http/Queries.zig");
 
 pub const Version = enum {
     @"HTTP/1.1",

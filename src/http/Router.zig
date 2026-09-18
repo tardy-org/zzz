@@ -26,9 +26,9 @@ pub fn get_bundle_from_host(
     captures: []Trie.Capture,
     queries: *http.Queries,
 ) !Trie.Bundle {
-    queries.clearRetainingCapacity();
+    queries.clear(gpa);
 
-    return try router.routes.get_bundle(
+    return try router.routes.bundle(
         gpa,
         path,
         captures,
@@ -40,7 +40,6 @@ pub fn get_bundle_from_host(
         ),
         .captures = captures[0..],
         .queries = queries,
-        .duped = &.{},
     };
 }
 
@@ -66,6 +65,10 @@ pub const default_not_found_handler = struct {
     }
 }.notFound;
 
+test {
+    std.testing.refAllDecls(@This());
+}
+
 const log = std.log.scoped(.@"zzz/http/router");
 
 const std = @import("std");
@@ -77,6 +80,7 @@ const Context = http.Context;
 const Mime = http.Mime;
 const Request = http.Request;
 const Respond = http.Respond;
+
 pub const FsDir = @import("router/FsDir.zig");
 pub const Middleware = @import("router/Middleware.zig");
 pub const Route = @import("router/Route.zig");

@@ -13,6 +13,8 @@ pub const empty: Storage = .{
 
 pub fn deinit(storage: *Storage, gpa: mem.Allocator) void {
     var arena_alloc = storage.arena_state.promote(gpa);
+    defer storage.arena_state = arena_alloc.state;
+
     storage.map.deinit(arena_alloc.allocator());
     arena_alloc.deinit();
 }
@@ -22,7 +24,7 @@ pub fn clear(storage: *Storage, gpa: mem.Allocator) void {
     var arena_alloc = storage.arena_state.promote(gpa);
     defer storage.arena_state = arena_alloc.state;
 
-    storage.map.clearAndFree(arena_alloc.allocator());
+    storage.map.clearRetainingCapacity();
     _ = arena_alloc.reset(.retain_capacity);
 }
 
