@@ -9,7 +9,7 @@ pub const Token = union(Enum) {
         string,
         remaining,
 
-        pub fn as_type(match: Match) type {
+        pub fn toType(match: Match) type {
             switch (match) {
                 .unsigned => return u64,
                 .signed => return i64,
@@ -25,7 +25,7 @@ pub const Token = union(Enum) {
         match = 1,
     };
 
-    pub fn parse_chunk(chunk: []const u8) Token {
+    pub fn parse(chunk: []const u8) Token {
         if (mem.startsWith(u8, chunk, "%")) {
             // Needs to be only % and an identifier.
             debug.assert(chunk.len == 2);
@@ -46,7 +46,7 @@ pub const Token = union(Enum) {
 
 test "Chunk Parsing (Fragment)" {
     const chunk = "thisIsAFragment";
-    const token: Token = .parse_chunk(chunk);
+    const token: Token = .parse(chunk);
 
     switch (token) {
         .fragment => |fragment| try testing.expectEqualStrings(
@@ -75,7 +75,7 @@ test "Chunk Parsing (Match)" {
     };
 
     for (chunks, matches) |chunk, match| {
-        const token: Token = .parse_chunk(chunk);
+        const token: Token = .parse(chunk);
 
         switch (token) {
             .fragment => return error.IncorrectTokenParsing,
@@ -96,10 +96,14 @@ test "Path Parsing (Mixed)" {
         .{ .fragment = "description" },
     };
 
-    var iter = mem.tokenizeScalar(u8, path, '/');
+    var iter = mem.tokenizeScalar(
+        u8,
+        path,
+        '/',
+    );
 
     for (parsed) |expected| {
-        const token: Token = .parse_chunk(iter.next().?);
+        const token: Token = .parse(iter.next().?);
         switch (token) {
             .fragment => |fragment| try testing.expectEqualStrings(
                 expected.fragment,
