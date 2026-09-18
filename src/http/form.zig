@@ -110,13 +110,13 @@ fn construct_map_from_body(
         if (mem.findScalar(u8, value, '=') != null)
             return error.MalformedPair;
 
-        const decoded_key = try decode_alloc(
+        const decoded_key = try percentDecode(
             gpa,
             key,
         );
         errdefer gpa.free(decoded_key);
 
-        const decoded_value = try decode_alloc(
+        const decoded_value = try percentDecode(
             gpa,
             value,
         );
@@ -136,32 +136,72 @@ fn construct_map_from_body(
     }
 }
 
-pub fn decode_alloc(gpa: mem.Allocator, input: []const u8) ![]const u8 {
+/// https://url.spec.whatwg.org/#percent-decode
+/// Caller owns the returned memory and must free it
+pub fn percentDecode(gpa: mem.Allocator, input: []const u8) ![]const u8 {
     var list: std.ArrayList(u8) = try .initCapacity(gpa, input.len);
     defer list.deinit(gpa);
 
     var input_index: usize = 0;
-    while (input_index < input.len) {
-        defer input_index += 1;
+    while (input_index < input.len) : (input_index += 1) {
         const byte = input[input_index];
         switch (byte) {
             '%' => {
-                if (input_index + 2 >= input.len) return error.InvalidEncoding;
-                list.appendAssumeCapacity(
-                    try fmt.parseInt(
-                        u8,
-                        input[input_index + 1 .. input_index + 3],
-                        16,
-                    ),
-                );
-                input_index += 2;
+                const hex_bytes_size = 2;
+                debug.assert(input_index + hex_bytes_size < input.len);
+
+                const next_hex =
+                    input[input_index + 1 ..][0..hex_bytes_size];
+
+                switch (next_hex[0]) {
+                    // 0...9, A...F, a...f
+                    0x30...0x39, 0x41...0x46, 0x61...0x66 => {
+                        switch (next_hex[1]) {
+                            0x30...0x39, 0x41...0x46, 0x61...0x66 => {
+                                const next_byte = try fmt.parseInt(
+                                    u8,
+                                    next_hex,
+                                    16,
+                                );
+                                defer input_index += hex_bytes_size;
+
+                                list.appendAssumeCapacity(next_byte);
+                            },
+                            else => {
+                                list.appendAssumeCapacity(byte);
+                            },
+                        }
+                    },
+                    else => {
+                        list.appendAssumeCapacity(byte);
+                    },
+                }
             },
             '+' => list.appendAssumeCapacity(' '),
             else => list.appendAssumeCapacity(byte),
         }
     }
 
-    return list.toOwnedSlice(gpa);
+    try list.shrinkToLen(gpa);
+
+    return list.toOwnedSliceAssert();
+}
+
+test percentDecode {
+    const gpa = testing.allocator;
+
+    const inputs: [2]struct { []const u8, []const u8 } = .{
+        .{ "%25%s%1G", "%%s%1G" },
+        .{ "‽%25%2E", &.{ 0xE2, 0x80, 0xBD, 0x25, 0x2E } },
+    };
+
+    for (inputs) |tests_values| {
+        const input, const expected = tests_values;
+        const actual = try percentDecode(gpa, input);
+        defer gpa.free(actual);
+
+        try testing.expectEqualSlices(u8, expected[0..], actual);
+    }
 }
 
 // https://datatracker.ietf.org/doc/html/rfc1866#section-8.2.1
