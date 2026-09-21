@@ -2,11 +2,11 @@
     .name = .zzz,
     .fingerprint = 0xc3273dca261a7ae0,
     .version = "0.3.2-dev",
-    .minimum_zig_version = "0.17.0-dev.1454+5faa79730",
+    .minimum_zig_version = "0.17.0-dev.2248+3f6a02acd",
     .dependencies = .{
         .secsock = .{
-            .url = "git+https://github.com/tardy-org/secsock?ref=main#3261e70d67e8a8abc387601c96c406bdf4d9d7ba",
-            .hash = "secsock-0.1.2-dev-p0qurRrfAADLugj7SMHIa4XkwRTgrgjoz3GrWpYyA7B6",
+            .url = "git+https://github.com/tardy-org/secsock?ref=main#71a10721d12cbbf0b9bdbb3a70f7e5c82aaafa59",
+            .hash = "secsock-0.1.2-dev-p0qurcfnAADkDb2q2pxFWwTWBplyW7jcC1giD_1-GuE_",
         },
     },
     .paths = .{
