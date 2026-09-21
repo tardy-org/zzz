@@ -92,6 +92,8 @@ pub fn percentDecode(gpa: mem.Allocator, input: []const u8) ![]const u8 {
                     },
                 }
             },
+            // https://url.spec.whatwg.org/#application/x-www-form-urlencoded
+            // Replace any 0x2B (+) in name and value with 0x20 (SP)
             '+' => list.appendAssumeCapacity(' '),
             else => list.appendAssumeCapacity(byte),
         }
