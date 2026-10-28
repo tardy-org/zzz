@@ -1,8 +1,8 @@
 .{
     .name = .zzz,
     .fingerprint = 0xc3273dca261a7ae0,
-    .version = "0.3.2-dev",
-    .minimum_zig_version = "0.17.0-dev.1454+5faa79730",
+    .version = "0.3.3",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .secsock = .{
             .url = "git+https://github.com/tardy-org/secsock?ref=main#3261e70d67e8a8abc387601c96c406bdf4d9d7ba",
