@@ -3,23 +3,23 @@ pub const Frame = @This();
 header: Header,
 payload: Payload,
 
-fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
+pub fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     debug.assert(payload_buf.len <= config.recv_buffer_size.Usize());
 
-    const payload_size, const payload_category = blk: {
-        const len = if (option.status) |_|
+    const payload_len, const payload_category = blk: {
+        const size = if (option.opcode == .close)
             option.message.len + @sizeOf(http.Status)
         else
             option.message.len;
 
-        const category: u7 = if (len <= 125)
-            @intCast(len)
-        else if (len < 1024 * 64) 126 else 127;
+        const category: u7 = if (size <= 125)
+            @intCast(size)
+        else if (size < 1024 * 64) 126 else 127;
 
-        break :blk .{ len, category };
+        break :blk .{ size, category };
     };
 
-    debug.assert(payload_buf.len >= payload_size);
+    debug.assert(payload_buf.len >= payload_len);
 
     const header: Header = .{
         .fin = option.fin,
@@ -32,8 +32,8 @@ fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
 
     switch (payload_category) {
         0...125 => {},
-        126 => payload.extended_len = .{ .u16 = @intCast(payload_size) },
-        127 => payload.extended_len = .{ .u64 = payload_size },
+        126 => payload.extended_len = .{ .u16 = @intCast(payload_len) },
+        127 => payload.extended_len = .{ .u64 = payload_len },
     }
 
     // never must be set by server response but here to test
@@ -41,16 +41,18 @@ fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     if (option.masking_key) |masking_key| payload.masking_key = masking_key;
 
     // start of application payload
-    if (option.status) |status| payload.status = status;
+    if (option.status) |status| {
+        debug.assert(option.opcode == .close);
+        payload.status = status;
+    }
 
     {
-        @memcpy(payload_buf[0..option.message.len], option.message);
-
         if (option.masking_key) |masking_key| _ = unmask(
             payload_buf[0..option.message.len],
             option.message,
             masking_key,
-        );
+        ) else @memcpy(payload_buf[0..option.message.len], option.message);
+
         payload.data = payload_buf[0..option.message.len];
     }
 
@@ -58,6 +60,14 @@ fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
         .header = header,
         .payload = payload,
     };
+}
+
+pub fn len(frame: *const Frame) usize {
+    switch (frame.header.payload_len) {
+        0...125 => |len_| return len_,
+        126 => return frame.payload.extended_len.?.u16,
+        127 => return frame.payload.extended_len.?.u64,
+    }
 }
 
 pub fn format(
@@ -130,7 +140,7 @@ test format {
     var payload_buf: [msg.len + @sizeOf(http.Status)]u8 = undefined;
     const frame: Frame = .init(&payload_buf, .{
         .fin = true,
-        .opcode = .text,
+        .opcode = .close,
         .masking_key = 0xA,
         .status = .OK,
         .message = msg[0..],
@@ -138,10 +148,10 @@ test format {
 
     const expected =
         \\Pretty:
-        \\direct: .{ .header = .{ .payload_len = 126, .mask = true, .opcode = .text, .rsv1_3 = 0, .fin = true }, .payload = .{ .extended_len = .{ ... }, .masking_key = 10, .status = .OK, .data = { 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65 } } }
+        \\direct: .{ .header = .{ .payload_len = 126, .mask = true, .opcode = .close, .rsv1_3 = 0, .fin = true }, .payload = .{ .extended_len = .{ ... }, .masking_key = 10, .status = .OK, .data = { 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65 } } }
         \\
         \\Fin Opcode
-        \\0x81
+        \\0x88
         \\
         \\Mask Toggle and Standard Payload length
         \\0xFE
@@ -159,7 +169,7 @@ test format {
         \\0x4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141
     ;
 
-    var fmt_buf: [expected.len]u8 = undefined;
+    var fmt_buf: [expected.len * 2]u8 = undefined;
     const actual = try mem.print(&fmt_buf, "Pretty:\n{f}", .{
         frame,
     });
@@ -206,19 +216,21 @@ pub fn bytes(frame: *const Frame, buf: []u8) []const u8 {
     }
 
     // Masking length
-    if (frame.payload.masking_key) |key| {
+    if (frame.payload.masking_key) |masking_key| {
         const mask_size = @sizeOf(MaskingKey);
         defer buf_index += mask_size;
 
         mem.writeInt(
             MaskingKey,
             buf[buf_index..][0..mask_size],
-            key,
+            masking_key,
             .big,
         );
     }
 
     if (frame.payload.status) |status| {
+        debug.assert(frame.header.opcode == .close);
+
         const status_size = @sizeOf(http.Status); // 2 bytes
         defer buf_index += status_size;
 
@@ -239,9 +251,10 @@ pub fn bytes(frame: *const Frame, buf: []u8) []const u8 {
 
     // Payload
     {
-        const data_len = frame.payload.data.len;
-        defer buf_index += data_len;
-        @memcpy(buf[buf_index..][0..data_len], frame.payload.data);
+        const payload_data = frame.payload.data;
+        defer buf_index += payload_data.len;
+
+        @memcpy(buf[buf_index..][0..payload_data.len], payload_data);
     }
 
     debug.assert(buf.len >= buf_index);
@@ -538,10 +551,6 @@ pub const Fragment = struct {
     }
 };
 
-fn mask(buf: []u8, payload: []const u8, key: MaskingKey) []const u8 {
-    return unmask(buf, payload, key);
-}
-
 /// Convert `value` to an array of bytes in network bytes ordering
 pub fn toBytes(value: anytype) [@sizeOf(@TypeOf(value))]u8 {
     const T = @TypeOf(value);
@@ -683,6 +692,7 @@ pub const Payload = struct {
     /// If `Frame` is sent by the client, the next 4 bytes is `masking_key`
     masking_key: ?u32,
     /// Remaining bytes are "Payload data"
+    /// `status` is only set on `close` Frame
     status: ?http.Status,
     /// `Payload data` is defined as "Extension data" + "Application data"
     data: []const u8,
