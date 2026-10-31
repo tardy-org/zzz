@@ -3,6 +3,7 @@
 //! that has opted-in to communications from that code.
 pub const Frame = @import("websocket/Frame.zig");
 pub const handshake = @import("websocket/handshake.zig");
+pub const Receive = @import("websocket/Receive.zig");
 pub const Server = @import("websocket/Server.zig");
 
 test {
