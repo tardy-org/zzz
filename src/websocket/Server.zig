@@ -5,8 +5,7 @@ config: zzz.Config,
 pub fn init(config: zzz.Config) Server {
     const recv_buffer_size = config.recv_buffer_size.Usize();
     const recv_zerocopy_size = config.recv_zerocopy_size.Usize();
-    debug.assert(recv_buffer_size < recv_zerocopy_size);
-    debug.assert(recv_zerocopy_size % recv_buffer_size == 0);
+    debug.assert(recv_zerocopy_size >= recv_buffer_size * 3);
 
     return .{ .config = config };
 }
@@ -132,35 +131,35 @@ pub fn mainLoop(
     var state: State = .handshake;
     ws_loop: switch (state) {
         .handshake => {
-            const recv_slice = try provision.zc_recv_buffer.get_write_area(
+            const handshake_buf = try provision.zc_recv_buffer.get_write_area(
                 rt.gpa,
                 config.recv_buffer_size.Usize(),
             );
 
-            const recv_count = secure.recv(
+            const byte_count = secure.recv(
                 rt,
-                recv_slice,
-            ) catch |e|
-                switch (e) {
-                    error.Closed => break :ws_loop,
-                    else => |err| {
-                        log.err(
-                            "handshake recv failed on socket | {t}",
-                            .{err},
-                        );
-                        break :ws_loop;
-                    },
-                };
+                handshake_buf,
+            ) catch |e| switch (e) {
+                error.Closed => break :ws_loop,
+                else => |err| {
+                    log.err(
+                        "handshake recv failed on socket | {t}",
+                        .{err},
+                    );
+                    break :ws_loop;
+                },
+            };
+            provision.zc_recv_buffer.mark_written(byte_count);
 
-            provision.zc_recv_buffer.mark_written(recv_count);
-            if (provision.zc_recv_buffer.len > config.request_size_max.Usize())
+            if (provision.zc_recv_buffer.len() > config.request_size_max.Usize())
                 break :ws_loop;
 
-            const begin = provision.zc_recv_buffer.len - recv_count;
             const end_marker = "\r\n\r\n";
-            if (!mem.endsWith(u8, provision.zc_recv_buffer.subslice(.{
-                .start = begin,
-            }), end_marker)) {
+            if (!mem.endsWith(
+                u8,
+                handshake_buf[0..byte_count],
+                end_marker,
+            )) {
                 const respond = try provision.response.apply(.{
                     .status = .@"Bad Request",
                     .mime = .TEXT,
@@ -170,13 +169,9 @@ pub fn mainLoop(
                 continue :ws_loop state;
             }
 
-            const end = provision.zc_recv_buffer.len;
-
             try provision.request.parse(
                 rt.gpa,
-                provision.zc_recv_buffer.subslice(
-                    .{ .end = end },
-                ),
+                handshake_buf[0..byte_count],
                 .{
                     .request_bytes_max = config.request_size_max,
                     .request_uri_bytes_max = config.request_uri_size_max,
@@ -190,21 +185,23 @@ pub fn mainLoop(
             ) == null);
 
             debug.assert(provision.request.method.? == .GET);
-            debug.assert(mem.eql(
-                u8,
-                provision.request.headers.get("Upgrade").?,
-                "websocket",
-            ));
+
+            const upgrade = provision.request.headers.get("Upgrade").?;
+            debug.assert(
+                mem.eql(u8, upgrade, "websocket") or
+                    mem.eql(u8, upgrade, "WebSocket"),
+            );
+
             debug.assert(mem.eql(
                 u8,
                 provision.request.headers.get("Connection").?,
                 "Upgrade",
             ));
-            debug.assert(std.fmt.parseInt(
+            debug.assert((std.fmt.parseInt(
                 u32,
                 provision.request.headers.get("Sec-WebSocket-Version").?,
                 10,
-            ) catch unreachable == protocal_version);
+            ) catch unreachable) == protocal_version);
 
             if (provision.request.headers.get(
                 "Sec-WebSocket-Protocol",
@@ -293,7 +290,7 @@ pub fn mainLoop(
             };
             if (sent_length != headers.len) break :ws_loop;
 
-            state = .handler;
+            state = .{ .communication = .receive };
             continue :ws_loop state;
         },
         else => {},
@@ -385,8 +382,19 @@ const State = union(enum) {
     handshake,
     handler,
     // two-way communication channel
-    communication,
+    communication: Communication,
+    next_request,
+    next_respond: http.Respond,
     close,
+};
+
+const Communication = union(enum) {
+    receive,
+    ping: Frame,
+    pong: Frame,
+    text: Frame,
+    binary: Frame,
+    fragment: Frame,
 };
 
 pub const Provision = struct {
@@ -401,8 +409,7 @@ pub const Provision = struct {
     queries: http.Queries,
     request: http.Request,
     response: http.Response,
-    /// ordered set of acceptable subprotocol
-    /// by preference from client
+    /// ordered set of acceptable subprotocol by preference from client
     protocals: Set,
     /// ordered set of extensions
     extensions: Set,
@@ -413,11 +420,14 @@ pub const Provision = struct {
 /// WebSocket protocal version
 const protocal_version = 13;
 
+const endian = builtin.target.cpu.arch.endian();
 const log = std.log.scoped(.@"zzz/websocket/Server");
 
 const std = @import("std");
 const mem = std.mem;
+const math = std.math;
 const heap = std.heap;
+const ascii = std.ascii;
 const debug = std.debug;
 const Io = std.Io;
 const builtin = @import("builtin");
@@ -439,5 +449,6 @@ const Route = Router.Route;
 const Middleware = Router.Middleware;
 const Trie = Router.Trie;
 
-const handshake = @import("handshake.zig");
 const Frame = @import("Frame.zig");
+const handshake = @import("handshake.zig");
+const Receive = @import("Receive.zig");
