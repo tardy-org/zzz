@@ -721,7 +721,6 @@ test {
 }
 
 const log = std.log.scoped(.@"websocket/framing");
-const endian = builtin.target.cpu.arch.endian();
 
 const std = @import("std");
 const debug = std.debug;

@@ -1,11 +1,14 @@
 fn header(secure: *zzz.Secsock, rt: *Runtime) Frame.Header {
-    var frame: Frame.Header = undefined;
-    const header_size = secure.recv(
-        rt,
-        mem.asBytes(&frame),
-    ) catch unreachable;
-    debug.assert(header_size == @sizeOf(Frame.Header));
-    return frame;
+    var bytes: [@sizeOf(Frame.Header)]u8 = undefined;
+    const recv_count = secure.recv(rt, &bytes) catch unreachable;
+    debug.assert(bytes.len == recv_count);
+
+    const raw = mem.readInt(u16, &bytes, .big);
+    const header_frame: Frame.Header = @bitCast(raw);
+
+    log.debug("Header {any}", .{header_frame});
+
+    return header_frame;
 }
 
 pub fn first(
@@ -34,6 +37,9 @@ pub fn next(
 ) ?Frame {
     const head = header(secure, rt);
     var payload: Frame.Payload = .empty;
+    defer {
+        log.debug("Payload {any}", .{payload});
+    }
 
     const payload_buf =
         zc_recv_buffer.get_write_area(
@@ -44,30 +50,39 @@ pub fn next(
                 config.recv_buffer_size.Usize(),
         ) catch |err| debug.panic("{t}", .{err});
 
+    var payload_index: usize = 0;
     switch (head.payload_len) {
         0...125 => {},
         126 => {
-            const len_buf = payload_buf[zc_recv_buffer.len()..][0..@sizeOf(u16)];
-            const payload_size = secure.recv(
+            const size = @sizeOf(u16);
+            defer payload_index += size;
+
+            const len_buf = payload_buf[payload_index..][0..size];
+
+            const recv_count = secure.recv(
                 rt,
                 len_buf,
             ) catch |err| switch (err) {
                 error.Closed => return null,
                 else => unreachable,
             };
-            defer zc_recv_buffer.mark_written(payload_size);
+            defer zc_recv_buffer.mark_written(recv_count);
 
-            debug.assert(payload_size == @sizeOf(u16));
+            debug.assert(recv_count == size);
 
             const payload_len = mem.readInt(
                 u16,
                 len_buf,
-                endian,
+                .big,
             );
             payload.extended_len = .{ .u16 = payload_len };
         },
         127 => {
-            const len_buf = payload_buf[zc_recv_buffer.len()..][0..@sizeOf(u64)];
+            const size = @sizeOf(u64);
+            defer payload_index += size;
+
+            const len_buf = payload_buf[payload_index..][0..size];
+
             const payload_size = secure.recv(
                 rt,
                 len_buf,
@@ -77,21 +92,20 @@ pub fn next(
             };
             defer zc_recv_buffer.mark_written(payload_size);
 
-            debug.assert(payload_size == @sizeOf(u64));
+            debug.assert(payload_size == size);
 
-            const payload_len = mem.readInt(
-                u64,
-                len_buf,
-                endian,
-            );
+            const payload_len = mem.readInt(u64, len_buf, .big);
 
             payload.extended_len = .{ .u64 = payload_len };
         },
     }
 
     if (head.mask) {
+        const mask_size = @sizeOf(Frame.MaskingKey);
+        defer payload_index += mask_size;
+
         const mask_buf =
-            payload_buf[zc_recv_buffer.len()..][0..@sizeOf(Frame.MaskingKey)];
+            payload_buf[payload_index..][0..mask_size];
 
         const masking_key_size = secure.recv(
             rt,
@@ -99,12 +113,12 @@ pub fn next(
         ) catch unreachable;
         defer zc_recv_buffer.mark_written(masking_key_size);
 
-        debug.assert(masking_key_size == @sizeOf(Frame.MaskingKey));
+        debug.assert(masking_key_size == mask_size);
 
         payload.masking_key = mem.readInt(
             Frame.MaskingKey,
             mask_buf,
-            endian,
+            .big,
         );
     }
 
@@ -114,15 +128,18 @@ pub fn next(
     };
 
     {
-        const payload_data = payload_buf[zc_recv_buffer.len()..][0..frame.len()];
+        const payload_len = frame.len();
+        defer payload_index += payload_len;
 
-        const payload_size = secure.recv(
-            rt,
-            payload_data,
-        ) catch unreachable;
+        const payload_data = payload_buf[payload_index..][0..payload_len];
+
+        const payload_size = secure.recv(rt, payload_data) catch |err|
+            switch (err) {
+                error.Closed => 0,
+                else => unreachable,
+            };
         defer zc_recv_buffer.mark_written(payload_size);
-
-        debug.assert(payload_size == frame.len());
+        debug.assert(payload_size == payload_len);
 
         if (frame.payload.masking_key) |masking_key| _ = Frame.unmask(
             payload_data,
@@ -138,7 +155,7 @@ pub fn next(
                 frame.payload.status = @fromBackingInt(mem.readInt(
                     @typeInfo(http.Status).@"enum".tag_type,
                     status,
-                    endian,
+                    .big,
                 ));
                 frame.payload.data = payload_data[status_size..];
             },
@@ -149,7 +166,7 @@ pub fn next(
     return frame;
 }
 
-const endian = builtin.target.cpu.arch.endian();
+const log = std.log.scoped(.@"websocket/Receive");
 
 const std = @import("std");
 const mem = std.mem;
