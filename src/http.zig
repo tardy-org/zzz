@@ -19,6 +19,9 @@ pub const Router = @import("http/Router.zig");
 pub const Server = @import("http/Server.zig");
 pub const SSE = @import("http/SSE.zig");
 pub const Status = @import("http/status.zig").Status;
+const zzz = @import("root.zig");
+
+const log = std.log.scoped(.http);
 
 pub const Version = enum {
     @"HTTP/1.1",
@@ -50,6 +53,55 @@ pub const Error = error{
     URITooLong,
     UnSupportedHTTPVersion,
 };
+
+pub fn recv_all(
+    rt_: *zzz.tardy.Runtime,
+    transport: *zzz.Secsock,
+    zc_buf: *zzz.tardy.core.ZeroCopy(u8),
+    conf: *const zzz.Config,
+) !usize {
+    var recv_count: usize = 0;
+    while (true) {
+        const recv_slice = try zc_buf.get_write_area(
+            rt_.gpa,
+            conf.recv_buffer_size.Usize(),
+        );
+
+        const count = transport.recv(
+            rt_,
+            recv_slice,
+        ) catch |err|
+            switch (err) {
+                // 0 is always waiting for I/O
+                // TODO: error.Closed has to be observable
+                error.Closed => return recv_count,
+                else => |e| {
+                    log.err(
+                        "request=>header: recv failed on socket | {t}",
+                        .{e},
+                    );
+                    return e;
+                },
+            };
+        recv_count += count;
+        zc_buf.mark_written(count);
+
+        if (mem.endsWith(
+            u8,
+            recv_slice[0..count],
+            "\r\n\r\n",
+        )) {
+            if (recv_count > conf.recv_buffer_size.Usize()) {
+                log.warn(
+                    "consider setting `config.recv_buffer_size` >= {Bi} to reduce memory pressure and make Server more efficient",
+                    .{recv_count},
+                );
+            }
+            return recv_count;
+        }
+    }
+    unreachable;
+}
 
 /// https://url.spec.whatwg.org/#percent-decode
 /// Caller owns the returned memory and must free it

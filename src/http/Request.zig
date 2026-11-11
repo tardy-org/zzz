@@ -36,6 +36,7 @@ pub fn clear(request: *Request, gpa: mem.Allocator) void {
     request.headers.clearRetainingCapacity();
 }
 
+// TODO: use arena for the allocator (Cookies, allocator)
 pub fn parse(
     request: *Request,
     gpa: mem.Allocator,

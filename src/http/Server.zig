@@ -3,6 +3,10 @@ pub const Server = @This();
 config: zzz.Config,
 
 pub fn init(config: zzz.Config) Server {
+    const recv_buffer_size = config.recv_buffer_size.Usize();
+    const recv_zerocopy_size = config.recv_zerocopy_size.Usize();
+    debug.assert(recv_zerocopy_size >= recv_buffer_size * 3);
+
     return .{ .config = config };
 }
 
@@ -151,45 +155,39 @@ pub fn mainLoop(
     http_loop: switch (state) {
         .request => |*kind| switch (kind.*) {
             .header => {
-                const recv_slice = try provision.zc_recv_buffer.get_write_area(
-                    rt.gpa,
-                    config.recv_buffer_size.Usize(),
-                );
-                const recv_count = secure.recv(
+                const recv_count = try http.recv_all(
                     rt,
-                    recv_slice,
-                ) catch |e|
-                    switch (e) {
-                        error.Closed => break :http_loop,
-                        else => |err| {
-                            log.err(
-                                "request=>header: recv failed on socket | {t}",
-                                .{err},
-                            );
-                            break :http_loop;
-                        },
-                    };
-
-                provision.zc_recv_buffer.mark_written(recv_count);
-                if (provision.zc_recv_buffer.len > config.request_size_max.Usize())
+                    &secure,
+                    &provision.zc_recv_buffer,
+                    &config,
+                );
+                if (provision.zc_recv_buffer.len() > config.request_size_max.Usize())
                     break :http_loop;
 
-                const begin = provision.zc_recv_buffer.len - recv_count;
-
                 const end_marker = "\r\n\r\n";
+                const begin = provision.zc_recv_buffer.len() - recv_count;
+
                 if (!mem.endsWith(u8, provision.zc_recv_buffer.subslice(.{
                     .start = begin,
                 }), end_marker)) {
                     const respond = try provision.response.apply(.{
                         .status = .@"Bad Request",
-                        .mime = .TEXT,
-                        .body = "Check if using https/http incorrectly in the request.\n",
+                        .mime = .JSON,
+                        // TODO: maybe rt should have an `arena` and `gpa`
+                        .body = try rt.gpa.print("{f}", .{
+                            std.json.fmt(
+                                struct { msg: []const u8 }{
+                                    .msg = "Check if using https/http incorrectly in the request.",
+                                },
+                                .{},
+                            ),
+                        }),
                     });
                     state = .{ .next_respond = respond };
                     continue :http_loop state;
                 }
 
-                const end = provision.zc_recv_buffer.len;
+                const end = provision.zc_recv_buffer.len();
 
                 try provision.request.parse(
                     rt.gpa,
@@ -228,7 +226,7 @@ pub fn mainLoop(
                         .body = .{
                             // TODO: this seems like a vestiage for the past
                             // investigate and remove it if found not useful
-                            .current_length = provision.zc_recv_buffer.len - end,
+                            .current_length = provision.zc_recv_buffer.len() - end,
                             .content_length = content_length,
                         },
                     },
@@ -239,7 +237,7 @@ pub fn mainLoop(
                 if (info.current_length == info.content_length) {
                     provision.request.body = provision.zc_recv_buffer.subslice(
                         .{
-                            .start = provision.zc_recv_buffer.len - info.content_length,
+                            .start = provision.zc_recv_buffer.len() - info.content_length,
                         },
                     );
 
@@ -264,7 +262,7 @@ pub fn mainLoop(
                 };
 
                 provision.zc_recv_buffer.mark_written(recv_count);
-                if (provision.zc_recv_buffer.len > config.request_size_max.Usize())
+                if (provision.zc_recv_buffer.len() > config.request_size_max.Usize())
                     break :http_loop;
 
                 info.current_length += recv_count;
