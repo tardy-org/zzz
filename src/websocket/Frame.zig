@@ -8,7 +8,7 @@ pub fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
 
     const payload_len, const payload_category = blk: {
         const size = if (option.opcode == .close)
-            option.message.len + @sizeOf(http.Status)
+            option.message.len + @sizeOf(status.Close)
         else
             option.message.len;
 
@@ -41,9 +41,9 @@ pub fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     if (option.masking_key) |masking_key| payload.masking_key = masking_key;
 
     // start of application payload
-    if (option.status) |status| {
+    if (option.status) |close_status| {
         debug.assert(option.opcode == .close);
-        payload.status = status;
+        payload.status = close_status;
     }
 
     {
@@ -122,12 +122,12 @@ pub fn format(
         hex(w, raw[0..]);
     }
 
-    if (frame.payload.status) |status| {
+    if (frame.payload.status) |close_status| {
         try w.writeAll("\n\nPayload status\n");
-        const mask_size = @sizeOf(http.Status);
+        const mask_size = @sizeOf(status.Close);
         defer index += mask_size;
 
-        try w.print("{t}", .{status});
+        try w.print("{t}", .{close_status});
     }
 
     try w.writeAll("\n\nPayload\n");
@@ -137,18 +137,18 @@ pub fn format(
 test format {
     const msg: [126]u8 = @splat('A');
 
-    var payload_buf: [msg.len + @sizeOf(http.Status)]u8 = undefined;
+    var payload_buf: [msg.len + @sizeOf(status.Close)]u8 = undefined;
     const frame: Frame = .init(&payload_buf, .{
         .fin = true,
         .opcode = .close,
         .masking_key = 0xA,
-        .status = .OK,
+        .status = .@"Normal Closure",
         .message = msg[0..],
     }, .{});
 
     const expected =
         \\Pretty:
-        \\direct: .{ .header = .{ .payload_len = 126, .mask = true, .opcode = .close, .rsv1_3 = 0, .fin = true }, .payload = .{ .extended_len = .{ ... }, .masking_key = 10, .status = .OK, .data = { 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65 } } }
+        \\direct: .{ .header = .{ .payload_len = 126, .mask = true, .opcode = .close, .rsv1_3 = 0, .fin = true }, .payload = .{ .extended_len = .{ ... }, .masking_key = 10, .status = .Normal Closure, .data = { 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65, 65, 75, 65, 65 } } }
         \\
         \\Fin Opcode
         \\0x88
@@ -163,7 +163,7 @@ test format {
         \\0x000x000x000x0A
         \\
         \\Payload status
-        \\OK
+        \\Normal Closure
         \\
         \\Payload
         \\0x4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141414B4141
@@ -228,17 +228,17 @@ pub fn bytes(frame: *const Frame, buf: []u8) []const u8 {
         );
     }
 
-    if (frame.payload.status) |status| {
+    if (frame.payload.status) |close_status| {
         debug.assert(frame.header.opcode == .close);
 
-        const status_size = @sizeOf(http.Status); // 2 bytes
+        const status_size = @sizeOf(status.Close);
         defer buf_index += status_size;
 
         const status_data = buf[buf_index..];
         mem.writeInt(
-            @typeInfo(http.Status).@"enum".tag_type,
+            @typeInfo(status.Close).@"enum".tag_type,
             status_data[0..status_size],
-            @backingInt(status),
+            @backingInt(close_status),
             .big,
         );
 
@@ -428,13 +428,13 @@ test binary {
     }
 }
 
-pub fn close(payload_buf: []u8, status: http.Status, reason: []const u8) Frame {
+pub fn close(payload_buf: []u8, close_status: status.Close, reason: []const u8) Frame {
     debug.assert(payload_buf.len >= Opcode.control_frame_payload_size_max);
 
     const closing: Frame = .init(payload_buf, .{
         .fin = true,
         .opcode = .close,
-        .status = status,
+        .status = close_status,
         .message = reason,
     }, .{});
 
@@ -592,7 +592,7 @@ test unmask {
 /// logical sequence of bits, arranged from least to most significant
 /// So we reverse the order of the bit fields to ensure it aligns with the
 /// specs requirement of most to least significant bit ordering
-pub const Header = packed struct(u16) {
+pub const Header = bitpack struct(u16) {
     /// The payload length is the length of the "Extension data" + the length of
     /// the "Application data"
     payload_len: u7,
@@ -693,7 +693,7 @@ pub const Payload = struct {
     masking_key: ?u32,
     /// Remaining bytes are "Payload data"
     /// `status` is only set on `close` Frame
-    status: ?http.Status,
+    status: ?status.Close,
     /// `Payload data` is defined as "Extension data" + "Application data"
     data: []const u8,
 
@@ -710,7 +710,7 @@ const Option = struct {
     opcode: Opcode,
     /// must never be set by server response
     masking_key: ?MaskingKey = null,
-    status: ?http.Status = null,
+    status: ?status.Close = null,
     message: []const u8,
 };
 
@@ -729,4 +729,4 @@ const testing = std.testing;
 const builtin = @import("builtin");
 
 const zzz = @import("zzz");
-const http = zzz.http;
+const status = @import("status.zig");
