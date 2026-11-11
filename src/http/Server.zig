@@ -273,141 +273,24 @@ pub fn mainLoop(
             },
         },
         .handler => {
-            const found = try router.get_bundle_from_host(
-                rt.gpa,
-                provision.request.uri.?,
-                provision.captures,
-                &provision.queries,
+            state = try loop.handler(
+                router,
+                &secure,
+                provision,
+                rt,
             );
-
-            const h_with_data: Route.Handler.WithData = found.route.handler(
-                provision.request.method.?,
-            ) orelse {
-                provision.response.headers.clearRetainingCapacity();
-                provision.response.status = .@"Method Not Allowed";
-                provision.response.mime = .TEXT;
-                provision.response.body = null;
-
-                state = .{ .next_respond = .responding };
-                continue :http_loop state;
-            };
-
-            const ctx: http.Context = .{
-                .runtime = rt,
-                .arena = provision.arena.allocator(),
-                .header_writer = &provision.header_writer,
-                .request = &provision.request,
-                .response = &provision.response,
-                .storage = &provision.storage,
-                .tls = &secure,
-                .captures = found.captures,
-                .queries = found.queries,
-            };
-
-            var next: Middleware.Next = .{
-                .ctx = &ctx,
-                .middlewares = h_with_data.middlewares,
-                .handler = h_with_data,
-            };
-
-            const respond: http.Respond = next.run() catch |err| respond: {
-                log.err("rt{d} - \"{t} {s}\" {t} ({s})", .{
-                    rt.id,
-                    provision.request.method.?,
-                    provision.request.uri.?,
-                    err,
-                    secure_info.address,
-                });
-
-                // If in Debug Mode, we will return the error name. In other modes,
-                // we won't to avoid leaking implemenation details.
-                const body = if (comptime builtin.mode == .debug)
-                    @errorName(err)
-                else
-                    "";
-
-                break :respond try provision.response.apply(.{
-                    .status = .@"Internal Server Error",
-                    .mime = .TEXT,
-                    .body = body,
-                });
-            };
-
-            state = .{ .next_respond = respond };
             continue :http_loop state;
         },
         .next_respond => |next_respond| {
-            switch (next_respond) {
-                .responding => {
-                    try provision.response.writeHeaders(
-                        &provision.header_writer,
-                        if (provision.response.body) |body|
-                            body.len
-                        else
-                            null,
-                    );
-                    const headers = provision.header_writer.buffered();
-
-                    // TODO: lets use optional properly
-                    const body = provision.response.body orelse "";
-
-                    const recv_slice = try provision.zc_recv_buffer.get_write_area(
-                        rt.gpa,
-                        config.recv_buffer_size.Usize(),
-                    );
-                    const pseudo: zcore.Pseudoslice = .init(
-                        headers,
-                        body,
-                        recv_slice,
-                    );
-
-                    var sent: usize = 0;
-                    while (sent < pseudo.len) {
-                        const send_slice = pseudo.get(
-                            sent,
-                            sent + recv_slice.len,
-                        );
-
-                        const sent_length = secure.send_all(
-                            rt,
-                            send_slice,
-                        ) catch |err| {
-                            log.err(
-                                "respond: send failed on socket | {t}",
-                                .{err},
-                            );
-                            break :http_loop;
-                        };
-                        defer sent += sent_length;
-
-                        if (sent_length != send_slice.len) break :http_loop;
-                    }
-
-                    state = .{ .next_respond = .responded };
-                    continue :http_loop state;
-                },
-                .responded => {
-                    const connection = provision.request.headers.get(
-                        "Connection",
-                    ) orelse "keep-alive";
-                    if (mem.eql(u8, connection, "close")) break :http_loop;
-                    if (config.keepalive_count_max) |max| {
-                        if (keepalive_count > max) {
-                            log.debug(
-                                "closing connection, exceeded keepalive max",
-                                .{},
-                            );
-                            break :http_loop;
-                        }
-
-                        keepalive_count += 1;
-                    }
-
-                    state = .next_request;
-                    continue :http_loop state;
-                },
-                .close => break :http_loop,
-            }
+            state = try loop.next_response(
+                next_respond,
+                &secure,
+                provision,
+                rt,
+                &keepalive_count,
+                config,
+            );
+            continue :http_loop state;
         },
         .next_request => {
             clearProvision(rt.gpa, provision, config);
@@ -505,7 +388,7 @@ const Request = union(enum) {
     };
 };
 
-const State = union(enum) {
+pub const State = union(enum) {
     request: Request,
     handler,
     next_request,
@@ -550,3 +433,5 @@ const Router = http.Router;
 const Route = Router.Route;
 const Middleware = Router.Middleware;
 const Trie = Router.Trie;
+
+const loop = @import("loop.zig");

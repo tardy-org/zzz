@@ -19,7 +19,7 @@ pub fn deinit(router: *Router, gpa: mem.Allocator) void {
     router.routes.deinit(gpa);
 }
 
-pub fn get_bundle_from_host(
+pub fn routingInfo(
     router: *const Router,
     gpa: mem.Allocator,
     path: []const u8,
