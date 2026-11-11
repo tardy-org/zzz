@@ -27,6 +27,16 @@ const zzz = b.dependency("zzz", .{
 exe.root_module.addImport(zzz);
 ```
 
+## Fuzzing the Server
+```elvish
+✗  podman run -it --rm ^
+  -v (pwd)/autobahn/config:/config ^
+  -v (pwd)/autobahn/reports:/reports ^
+  --network host ^
+  docker.io/crossbario/autobahn-testsuite ^
+  wstest -m fuzzingclient -s config/fuzzingclient.json
+```
+
 ## zzz?
 zzz is a framework for writing performant and reliable networked services in Zig. It supports both HTTP and HTTPS.
 
