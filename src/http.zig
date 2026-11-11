@@ -29,7 +29,7 @@ pub const Version = enum {
 
 pub const Respond = enum {
     // When we are returning a real HTTP request, we use this.
-    standard,
+    responding,
     // If we responded and we want to give control back to the HTTP engine.
     responded,
     // If we want the connection to close.

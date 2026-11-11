@@ -61,7 +61,7 @@ pub const default_not_found_handler = struct {
         response.mime = .TEXT;
         response.body = "404 | Not Found";
 
-        return .standard;
+        return .responding;
     }
 }.notFound;
 

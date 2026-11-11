@@ -288,7 +288,7 @@ pub fn mainLoop(
                 provision.response.mime = .TEXT;
                 provision.response.body = null;
 
-                state = .respond;
+                state = .{ .next_respond = .responding };
                 continue :http_loop state;
             };
 
@@ -338,8 +338,52 @@ pub fn mainLoop(
         },
         .next_respond => |next_respond| {
             switch (next_respond) {
-                .standard => {
-                    state = .respond;
+                .responding => {
+                    try provision.response.writeHeaders(
+                        &provision.header_writer,
+                        if (provision.response.body) |body|
+                            body.len
+                        else
+                            null,
+                    );
+                    const headers = provision.header_writer.buffered();
+
+                    // TODO: lets use optional properly
+                    const body = provision.response.body orelse "";
+
+                    const recv_slice = try provision.zc_recv_buffer.get_write_area(
+                        rt.gpa,
+                        config.recv_buffer_size.Usize(),
+                    );
+                    const pseudo: zcore.Pseudoslice = .init(
+                        headers,
+                        body,
+                        recv_slice,
+                    );
+
+                    var sent: usize = 0;
+                    while (sent < pseudo.len) {
+                        const send_slice = pseudo.get(
+                            sent,
+                            sent + recv_slice.len,
+                        );
+
+                        const sent_length = secure.send_all(
+                            rt,
+                            send_slice,
+                        ) catch |err| {
+                            log.err(
+                                "respond: send failed on socket | {t}",
+                                .{err},
+                            );
+                            break :http_loop;
+                        };
+                        defer sent += sent_length;
+
+                        if (sent_length != send_slice.len) break :http_loop;
+                    }
+
+                    state = .{ .next_respond = .responded };
                     continue :http_loop state;
                 },
                 .responded => {
@@ -364,54 +408,6 @@ pub fn mainLoop(
                 },
                 .close => break :http_loop,
             }
-        },
-        .respond => {
-            try provision.response.writeHeaders(
-                &provision.header_writer,
-                if (provision.response.body) |body|
-                    body.len
-                else
-                    null,
-            );
-            const headers = provision.header_writer.buffered();
-
-            // TODO: lets use optional properly
-            const body = provision.response.body orelse "";
-
-            const recv_slice = try provision.zc_recv_buffer.get_write_area(
-                rt.gpa,
-                config.recv_buffer_size.Usize(),
-            );
-            const pseudo: zcore.Pseudoslice = .init(
-                headers,
-                body,
-                recv_slice,
-            );
-
-            var sent: usize = 0;
-            while (sent < pseudo.len) {
-                const send_slice = pseudo.get(
-                    sent,
-                    sent + recv_slice.len,
-                );
-
-                const sent_length = secure.send_all(
-                    rt,
-                    send_slice,
-                ) catch |err| {
-                    log.err(
-                        "respond: send failed on socket | {t}",
-                        .{err},
-                    );
-                    break :http_loop;
-                };
-                defer sent += sent_length;
-
-                if (sent_length != send_slice.len) break :http_loop;
-            }
-
-            state = .{ .next_respond = .responded };
-            continue :http_loop state;
         },
         .next_request => {
             clearProvision(rt.gpa, provision, config);
@@ -512,7 +508,6 @@ const Request = union(enum) {
 const State = union(enum) {
     request: Request,
     handler,
-    respond,
     next_request,
     next_respond: http.Respond,
 };

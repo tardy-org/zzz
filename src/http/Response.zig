@@ -41,7 +41,7 @@ pub fn apply(response: *Response, into: Fields) !http.Respond {
     response.body = into.body;
     for (into.headers) |pair|
         try response.headers.put(ctx.arena, pair[0], pair[1]);
-    return .standard;
+    return .responding;
 }
 
 pub fn clear(response: *Response) void {

@@ -6,11 +6,13 @@
 pub fn Compression(comptime compression: Kind) Middleware.Layer {
     const func: Middleware.TypedFn(void) = switch (compression) {
         .gzip => |gzip| struct {
-            fn gzip_mw(next: *Middleware.Next, _: void) !http.Respond {
+            fn gzip_mw(next: *Middleware.Next, args: void) !http.Respond {
+                _ = args;
+
                 const respond = try next.run();
                 const response = next.ctx.response;
                 if (response.body) |body| if (body.len != 0 and
-                    respond == .standard)
+                    respond == .responding)
                 {
                     var compressed: std.Io.Writer.Allocating = try .initCapacity(
                         next.ctx.arena,
@@ -37,7 +39,7 @@ pub fn Compression(comptime compression: Kind) Middleware.Layer {
                     response.body = try compressed.toOwnedSlice();
                     errdefer compressed.allocator.free(response.body);
 
-                    return .standard;
+                    return .responding;
                 };
 
                 return respond;

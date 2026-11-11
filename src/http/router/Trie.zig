@@ -118,7 +118,11 @@ pub fn bundle(
                         },
                         // Float types MUST have a '.' to differentiate them.
                         .float => {
-                            _ = mem.findScalar(u8, chunk, '.') orelse continue :token_loop;
+                            _ = mem.findScalar(
+                                u8,
+                                chunk,
+                                '.',
+                            ) orelse continue :token_loop;
 
                             const value = fmt.parseFloat(
                                 f64,

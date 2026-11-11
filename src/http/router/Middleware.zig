@@ -36,8 +36,6 @@ pub const Next = struct {
     }
 };
 
-pub const Fn = *const fn (*Next, core.Args) anyerror!Respond;
-
 pub fn TypedFn(comptime T: type) type {
     return *const fn (*Next, T) anyerror!Respond;
 }
@@ -45,6 +43,8 @@ pub fn TypedFn(comptime T: type) type {
 pub const WithData = struct {
     func: Fn,
     args: core.Args,
+
+    pub const Fn = *const fn (*Next, core.Args) anyerror!Respond;
 };
 
 const log = std.log.scoped(.@"zzz/router/middleware");
