@@ -13,13 +13,13 @@ pub fn init(gpa: mem.Allocator, layers: []const Middleware.Layer) !Trie {
 
     for (layers) |layer| switch (layer) {
         .route => |route| {
-            var current = &trie.root;
             var iter = mem.tokenizeScalar(
                 u8,
                 route.path,
                 '/',
             );
 
+            var current = &trie.root;
             while (iter.next()) |chunk| {
                 const token: Token = .parse(chunk);
                 if (current.tokens.getPtr(token)) |child| {

@@ -155,33 +155,36 @@ pub fn mainLoop(
     http_loop: switch (state) {
         .request => |*kind| {
             state = try loop.request(
-                kind,
+                rt,
                 &secure,
                 provision,
-                rt,
                 config,
+                kind,
             );
             continue :http_loop state;
         },
         .handler => {
             state = try loop.handler(
+                rt,
                 router,
                 &secure,
                 provision,
-                rt,
             );
             continue :http_loop state;
         },
-        .next_respond => |next_respond| {
-            state = try loop.next_response(
-                next_respond,
+        .respond => |respond| {
+            state = try loop.response(
+                rt,
                 &secure,
                 provision,
-                rt,
-                &keepalive_count,
                 config,
+                respond,
+                &keepalive_count,
             );
-            continue :http_loop state;
+            switch (respond) {
+                .close => break :http_loop,
+                else => continue :http_loop state,
+            }
         },
         .next_request => {
             clearProvision(rt.gpa, provision, config);
@@ -269,6 +272,13 @@ fn clearProvision(gpa: mem.Allocator, provision: *Provision, config: zzz.Config)
         .{ .retain_capacity = {} });
 }
 
+pub const State = union(enum) {
+    request: Request,
+    handler,
+    respond: http.Respond,
+    next_request,
+};
+
 pub const Request = union(enum) {
     header,
     body: Body,
@@ -277,13 +287,6 @@ pub const Request = union(enum) {
         content_length: usize,
         current_length: usize,
     };
-};
-
-pub const State = union(enum) {
-    request: Request,
-    handler,
-    next_request,
-    next_respond: http.Respond,
 };
 
 pub const Provision = struct {

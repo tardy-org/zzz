@@ -1,9 +1,9 @@
 pub fn request(
-    kind: *http.Server.Request,
+    rt: *zzz.tardy.Runtime,
     secure: *Secsock,
     provision: *http.Server.Provision,
-    rt: *zzz.tardy.Runtime,
     config: zzz.Config,
+    kind: *http.Server.Request,
 ) !http.Server.State {
     switch (kind.*) {
         .header => {
@@ -14,7 +14,7 @@ pub fn request(
                 &config,
             );
             if (provision.zc_recv_buffer.len() > config.request_size_max.Usize())
-                return .{ .next_respond = .close };
+                return .{ .respond = .close };
 
             const end_marker = "\r\n\r\n";
             const begin = provision.zc_recv_buffer.len() - recv_count;
@@ -35,7 +35,7 @@ pub fn request(
                         ),
                     }),
                 });
-                return .{ .next_respond = respond };
+                return .{ .respond = respond };
             }
 
             const end = provision.zc_recv_buffer.len();
@@ -103,16 +103,16 @@ pub fn request(
                 rt,
                 recv_slice,
             ) catch |e| switch (e) {
-                error.Closed => return .{ .next_respond = .close },
+                error.Closed => return .{ .respond = .close },
                 else => |err| {
                     log.err("request=>body: recv failed on socket | {t}", .{err});
-                    return .{ .next_respond = .close };
+                    return .{ .respond = .close };
                 },
             };
-
             provision.zc_recv_buffer.mark_written(recv_count);
+
             if (provision.zc_recv_buffer.len() > config.request_size_max.Usize())
-                return .{ .next_respond = .close };
+                return .{ .respond = .close };
 
             info.current_length += recv_count;
             debug.assert(info.current_length <= info.content_length);
@@ -123,10 +123,10 @@ pub fn request(
 }
 
 pub fn handler(
+    rt: *zzz.tardy.Runtime,
     router: *const Router,
     secure: *Secsock,
     provision: *http.Server.Provision,
-    rt: *zzz.tardy.Runtime,
 ) !http.Server.State {
     const routing = try router.routingInfo(
         rt.gpa,
@@ -143,7 +143,7 @@ pub fn handler(
         provision.response.mime = .TEXT;
         provision.response.body = null;
 
-        return .{ .next_respond = .responding };
+        return .{ .respond = .responding };
     };
 
     const ctx: http.Context = .{
@@ -166,6 +166,7 @@ pub fn handler(
 
     const secure_info = secure.info();
 
+    // Note that the request handler sets the `ctx.response` when run
     const respond: http.Respond = next.run() catch |err| respond: {
         log.err("rt{d} - \"{t} {s}\" {t} ({s})", .{
             rt.id,
@@ -189,16 +190,16 @@ pub fn handler(
         });
     };
 
-    return .{ .next_respond = respond };
+    return .{ .respond = respond };
 }
 
-pub fn next_response(
-    respond: http.Respond,
+pub fn response(
+    rt: *zzz.tardy.Runtime,
     secure: *Secsock,
     provision: *http.Server.Provision,
-    rt: *zzz.tardy.Runtime,
-    keepalive_count: *u16,
     config: zzz.Config,
+    respond: http.Respond,
+    keepalive_count: *u16,
 ) !http.Server.State {
     switch (respond) {
         .responding => {
@@ -239,21 +240,23 @@ pub fn next_response(
                         "respond: send failed on socket | {t}",
                         .{err},
                     );
-                    return .{ .next_respond = .close };
+                    return .{ .respond = .close };
                 };
                 defer sent += sent_length;
 
-                if (sent_length != send_slice.len) return .{ .next_respond = .close };
+                if (sent_length != send_slice.len) return .{
+                    .respond = .close,
+                };
             }
 
-            return .{ .next_respond = .responded };
+            return .{ .respond = .responded };
         },
         .responded => {
             const connection = provision.request.headers.get(
                 "Connection",
             ) orelse "keep-alive";
             if (mem.eql(u8, connection, "close")) return .{
-                .next_respond = .close,
+                .respond = .close,
             };
 
             if (config.keepalive_count_max) |max| {
@@ -262,7 +265,7 @@ pub fn next_response(
                         "closing connection, exceeded keepalive max",
                         .{},
                     );
-                    return .{ .next_respond = .close };
+                    return .{ .respond = .close };
                 }
 
                 keepalive_count.* += 1;
@@ -270,7 +273,7 @@ pub fn next_response(
 
             return .{ .next_request = {} };
         },
-        .close => return .{ .next_respond = .close },
+        .close => return .{ .respond = .close },
     }
 }
 
