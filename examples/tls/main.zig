@@ -42,7 +42,7 @@ pub fn main(init: std.process.Init) !void {
     var router: http.Router = try .init(init.gpa, &.{
         Route.init("/").get({}, handler).layer(),
         middleware.Compression(.{ .gzip = .{} }),
-        Route.init("/embed/pico.min.css").embed_file(
+        Route.init("/embed/pico.min.css").embedFile(
             .{ .mime = .CSS },
             @embedFile("embed/pico.min.css"),
         ).layer(),
@@ -70,7 +70,6 @@ pub fn main(init: std.process.Init) !void {
                 const server: http.Server = .init(.{ .stack_size = .max });
 
                 try server.serve(rt, p.router, p.tls);
-                defer server.deinit();
             }
         }.entry,
     );

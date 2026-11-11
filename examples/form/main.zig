@@ -101,11 +101,10 @@ pub fn main(init: std.process.Init) !void {
             fn entry(rt: *tardy.Runtime, p: EntryParams) !void {
                 const server: http.Server = .init(.{
                     .stack_size = .@"1MiB",
-                    .socket_buffer_size = .@"2KiB",
+                    .recv_buffer_size = .@"2KiB",
                 });
 
                 try server.serve(rt, p.router, p.tls);
-                defer server.deinit();
             }
         }.entry,
     );

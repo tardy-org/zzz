@@ -35,14 +35,13 @@ pub fn main(init: std.process.Init) !void {
         struct {
             fn entry(rt: *tardy.Runtime, p: *const EntryParams) !void {
                 var ws: websocket.Server = .init(.{
-                    .stack_size = .@"64KiB",
-                    .socket_buffer_size = .@"2KiB",
-                    .max_keepalive_count = null,
-                    .max_connection_count = 1024,
+                    .stack_size = .KiB(64),
+                    .recv_buffer_size = .@"2KiB",
+                    .keepalive_count_max = null,
+                    .connection_count_max = 64,
                 });
 
                 try ws.serve(rt, p.router, p.tls);
-                defer ws.deinit();
             }
         }.entry,
     );

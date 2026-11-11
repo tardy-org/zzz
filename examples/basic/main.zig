@@ -1,4 +1,11 @@
-const Tardy = tardy.Tardy(.auto);
+const Tardy = tardy.Tardy(.epoll);
+pub const std_options: std.Options = .{
+    .log_level = switch (@import("builtin").optimize) {
+        .debug => .debug,
+        .safe => .info,
+        else => .err,
+    },
+};
 
 fn hello_world(ctx: *const http.Context, _: void) !http.Respond {
     return ctx.response.apply(.{
@@ -41,18 +48,17 @@ pub fn main(init: std.process.Init) !void {
     try t.entry(
         params,
         struct {
-            fn entry(rt: *tardy.Runtime, p: EntryParams) !void {
+            fn start(rt: *tardy.Runtime, p: EntryParams) !void {
                 var server: http.Server = .init(.{
-                    .stack_size = .@"64KiB",
-                    .socket_buffer_size = .@"2KiB",
-                    .max_keepalive_count = null,
-                    .max_connection_count = 1024,
+                    .stack_size = .KiB(64),
+                    .recv_buffer_size = .Bytes(640),
+                    .keepalive_count_max = null,
+                    .connection_count_max = 64,
                 });
 
                 try server.serve(rt, p.router, p.tls);
-                defer server.deinit();
             }
-        }.entry,
+        }.start,
     );
 }
 
