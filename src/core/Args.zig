@@ -30,7 +30,7 @@ pub const Args = enum(usize) {
                 ))),
                 .@"struct" => |info| {
                     switch (info.layout) {
-                        .@"packed" => {
+                        .@"bitpack" => {
                             const uint = @Int(.unsigned, @typeInfo(
                                 info.backing_integer.?,
                             ).int.bits);
@@ -72,7 +72,7 @@ pub const Args = enum(usize) {
                 },
                 .@"struct" => |info| {
                     switch (info.layout) {
-                        .@"packed" => {
+                        .@"bitpack" => {
                             const uint = @Int(.unsigned, @typeInfo(
                                 info.backing_integer.?,
                             ).int.bits);
@@ -119,7 +119,7 @@ pub const Args = enum(usize) {
             },
             .@"struct" => |s| {
                 switch (s.layout) {
-                    .@"packed" => {
+                    .@"bitpack" => {
                         @branchHint(.likely);
                         assert(@bitSizeOf(To) <= @bitSizeOf(From));
                     },
@@ -202,7 +202,7 @@ test "wrap/unwrap - pointers" {
 
 test "wrap/unwrap - packed/extern/auto struct" {
     {
-        const Handle = packed struct {
+        const Handle = bitpack struct {
             handle: i32,
         };
         const handle: Handle = .{ .handle = 42 };
