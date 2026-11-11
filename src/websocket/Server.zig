@@ -293,6 +293,247 @@ pub fn mainLoop(
             state = .{ .communication = .receive };
             continue :ws_loop state;
         },
+        .next_request => {
+            clearProvision(rt.gpa, provision, config);
+
+            state = .handshake;
+            continue :ws_loop state;
+        },
+        .communication => |communication| {
+            switch (communication) {
+                else => {},
+                .fragment => |fragment| {
+                    debug.assert(fragment.header.isStart());
+
+                    const arena = provision.arena.allocator();
+                    var frames: std.ArrayList(Frame) = try .initCapacity(
+                        arena,
+                        24,
+                    );
+                    defer frames.deinit(arena);
+
+                    try frames.append(arena, fragment);
+
+                    while (Receive.next(
+                        &secure,
+                        rt,
+                        &provision.zc_recv_buffer,
+                        config,
+                    )) |next| {
+                        debug.assert(next.header.isContinue() or next.header.isEnd());
+
+                        if (next.header.isControl()) debug.panic(
+                            "TODO: handle when it isn't a control frame",
+                            .{},
+                        );
+
+                        try frames.append(arena, next);
+                    }
+
+                    var payload: std.ArrayList([]const u8) = .empty;
+                    for (frames.items) |frame|
+                        try payload.append(arena, frame.payload.data);
+
+                    const payload_data = try mem.concat(
+                        arena,
+                        u8,
+                        payload.items,
+                    );
+
+                    const frame: Frame = .init(
+                        payload_data,
+                        .{
+                            .fin = true,
+                            .opcode = fragment.header.opcode,
+                            .message = payload_data,
+                        },
+                        .{},
+                    );
+                    _ = frame;
+                },
+                .receive => {
+                    const new_frame = Receive.first(
+                        &secure,
+                        rt,
+                        &provision.zc_recv_buffer,
+                        config,
+                    );
+
+                    const is_fragment = new_frame.header.isFragment();
+                    if (is_fragment) {
+                        state = .{
+                            .communication = .{
+                                .fragment = new_frame,
+                            },
+                        };
+                    } else switch (new_frame.header.opcode) {
+                        else => {},
+                        .close => {
+                            state = .{
+                                .communication = .{
+                                    .close = new_frame,
+                                },
+                            };
+                        },
+                        .text => {
+                            state = .{
+                                .communication = .{
+                                    .text = new_frame,
+                                },
+                            };
+                        },
+                        .ping => {
+                            state = .{
+                                .communication = .{
+                                    .pong = new_frame,
+                                },
+                            };
+                        },
+                        .pong => {
+                            state = .{
+                                .communication = .{
+                                    .ping = new_frame,
+                                },
+                            };
+                        },
+                    }
+                    continue :ws_loop state;
+                },
+                .text => |text| {
+                    const protocol_buf =
+                        try provision.zc_recv_buffer.get_write_area(
+                            rt.gpa,
+                            config.recv_buffer_size.Usize(),
+                        );
+                    const new_text = Frame.text(
+                        protocol_buf,
+                        text.payload.data,
+                        .{},
+                    );
+
+                    log.debug("Frame {f}", .{new_text});
+
+                    const protocol_bytes: []const u8 = new_text.bytes(
+                        protocol_buf[new_text.len()..],
+                    );
+
+                    const sent_length = secure.send_all(
+                        rt,
+                        protocol_bytes,
+                    ) catch |err| {
+                        log.err("text: send failed on socket | {t}", .{err});
+                        break :ws_loop;
+                    };
+                    defer provision.zc_recv_buffer.mark_written(sent_length);
+
+                    if (sent_length != protocol_bytes.len) {
+                        log.warn(
+                            "text sent {d} but was expected to send {d}",
+                            .{ sent_length, protocol_bytes.len },
+                        );
+                        break :ws_loop;
+                    }
+
+                    state = .{ .communication = .receive };
+                    continue :ws_loop state;
+                },
+                .ping => |ping| {
+                    const protocol_buf =
+                        try provision.zc_recv_buffer.get_write_area(
+                            rt.gpa,
+                            Frame.Opcode.control_frame_payload_size_max,
+                        );
+                    const protocol_bytes: []const u8 = ping.bytes(protocol_buf);
+
+                    const sent_length = secure.send_all(
+                        rt,
+                        protocol_bytes,
+                    ) catch |err| {
+                        log.err("ping: send failed on socket | {t}", .{err});
+                        break :ws_loop;
+                    };
+                    defer provision.zc_recv_buffer.mark_written(sent_length);
+
+                    if (sent_length != protocol_bytes.len) {
+                        log.warn(
+                            "ping sent {d} but was expected to send {d}",
+                            .{ sent_length, protocol_bytes.len },
+                        );
+                        break :ws_loop;
+                    }
+
+                    state = .{ .communication = .receive };
+                    continue :ws_loop state;
+                },
+                .pong => |ping| {
+                    var pong = ping;
+                    pong.header.opcode = .pong;
+
+                    const protocol_buf =
+                        try provision.zc_recv_buffer.get_write_area(
+                            rt.gpa,
+                            Frame.Opcode.control_frame_payload_size_max,
+                        );
+                    const protocol_bytes: []const u8 = pong.bytes(protocol_buf);
+
+                    const sent_length = secure.send_all(
+                        rt,
+                        protocol_bytes,
+                    ) catch |err| {
+                        log.err("pong: send failed on socket | {t}", .{err});
+                        break :ws_loop;
+                    };
+                    defer provision.zc_recv_buffer.mark_written(sent_length);
+
+                    if (sent_length != protocol_bytes.len) {
+                        log.warn(
+                            "pong sent {d} but was expected to send {d}",
+                            .{ sent_length, protocol_bytes.len },
+                        );
+                        break :ws_loop;
+                    }
+
+                    state = .{ .communication = .receive };
+                    continue :ws_loop state;
+                },
+                .close => |frame| {
+                    const close_buf = try provision.zc_recv_buffer.get_write_area(
+                        rt.gpa,
+                        Frame.Opcode.control_frame_payload_size_max,
+                    );
+                    log.info("close data is {s}", .{frame.payload.data});
+
+                    const close = Frame.close(
+                        close_buf,
+                        .@"Normal Closure",
+                        frame.payload.data,
+                    );
+                    provision.zc_recv_buffer.mark_written(close.len());
+
+                    const protocol_buf = try provision.zc_recv_buffer.get_write_area(
+                        rt.gpa,
+                        Frame.Opcode.control_frame_payload_size_max,
+                    );
+                    const protocol_bytes = close.bytes(protocol_buf);
+
+                    const sent_length = secure.send_all(
+                        rt,
+                        protocol_bytes,
+                    ) catch |err| {
+                        log.err("close: send failed on socket | {t}", .{err});
+                        break :ws_loop;
+                    };
+                    provision.zc_recv_buffer.mark_written(sent_length);
+
+                    if (sent_length != protocol_bytes.len) log.warn(
+                        "close sent {d} but was expected to send {d}",
+                        .{ sent_length, protocol_bytes.len },
+                    );
+
+                    break :ws_loop;
+                },
+            }
+        },
         else => {},
     }
 
@@ -385,7 +626,6 @@ const State = union(enum) {
     communication: Communication,
     next_request,
     next_respond: http.Respond,
-    close,
 };
 
 const Communication = union(enum) {
@@ -395,6 +635,7 @@ const Communication = union(enum) {
     text: Frame,
     binary: Frame,
     fragment: Frame,
+    close: Frame,
 };
 
 pub const Provision = struct {
