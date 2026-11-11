@@ -6,8 +6,6 @@ fn header(secure: *zzz.Secsock, rt: *Runtime) Frame.Header {
     const raw = mem.readInt(u16, &bytes, .big);
     const header_frame: Frame.Header = @bitCast(raw);
 
-    log.debug("Header {any}", .{header_frame});
-
     return header_frame;
 }
 
@@ -37,9 +35,6 @@ pub fn next(
 ) ?Frame {
     const head = header(secure, rt);
     var payload: Frame.Payload = .empty;
-    defer {
-        log.debug("Payload {any}", .{payload});
-    }
 
     const payload_buf =
         zc_recv_buffer.get_write_area(
@@ -133,13 +128,13 @@ pub fn next(
 
         const payload_data = payload_buf[payload_index..][0..payload_len];
 
-        const payload_size = secure.recv(rt, payload_data) catch |err|
+        const recv_count = secure.recv(rt, payload_data) catch |err|
             switch (err) {
                 error.Closed => 0,
                 else => unreachable,
             };
-        defer zc_recv_buffer.mark_written(payload_size);
-        debug.assert(payload_size == payload_len);
+        defer zc_recv_buffer.mark_written(recv_count);
+        debug.assert(recv_count == payload_len);
 
         if (frame.payload.masking_key) |masking_key| _ = Frame.unmask(
             payload_data,
@@ -149,14 +144,14 @@ pub fn next(
 
         switch (head.opcode) {
             .close => {
-                const status_size = @sizeOf(http.Status); // 2 bytes
-                const status = payload_data[0..status_size];
-
-                frame.payload.status = @fromBackingInt(mem.readInt(
-                    @typeInfo(http.Status).@"enum".tag_type,
-                    status,
+                const status_size = @sizeOf(status.Close);
+                const status_close = payload_data[0..status_size];
+                const raw = mem.readInt(
+                    @typeInfo(status.Close).@"enum".tag_type,
+                    status_close,
                     .big,
-                ));
+                );
+                frame.payload.status = @fromBackingInt(raw);
                 frame.payload.data = payload_data[status_size..];
             },
             else => frame.payload.data = payload_data,
@@ -174,7 +169,7 @@ const debug = std.debug;
 const builtin = @import("builtin");
 
 const zzz = @import("zzz");
-const http = zzz.http;
+const status = @import("status.zig");
 const Secsock = zzz.Secsock;
 const tardy = zzz.tardy;
 const core = tardy.core;
