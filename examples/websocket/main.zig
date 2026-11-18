@@ -1,6 +1,29 @@
 const Tardy = tardy.Tardy(.auto);
 
-const log = std.log.scoped(.@"examples/websocket");
+fn echo(ctx: *const http.Context, deps: void) !http.Respond {
+    _ = deps;
+    const req = ctx.websocket.?.request;
+
+    switch (req.header.opcode) {
+        // onClose
+        .close => {
+            return ctx.websocket.?.response.apply(.{
+                .fin = req.header.fin,
+                .opcode = req.header.opcode,
+                .status = .@"Normal Closure",
+                .message = @tagName(.@"Normal Closure"),
+            });
+        },
+        // onMessage
+        else => {
+            return ctx.websocket.?.response.apply(.{
+                .fin = req.header.fin,
+                .opcode = req.header.opcode,
+                .message = req.payload.data,
+            });
+        },
+    }
+}
 
 pub fn main(init: std.process.Init) !void {
     const host: []const u8 = "0.0.0.0";
@@ -13,7 +36,9 @@ pub fn main(init: std.process.Init) !void {
     });
     defer tcp.deinit(init.gpa);
 
-    var router: http.Router = try .init(init.gpa, &.{}, .{});
+    var router: http.Router = try .init(init.gpa, &.{
+        Route.init("/echo").get({}, echo).layer(),
+    }, .{});
     defer router.deinit(init.gpa);
 
     const EntryParams = struct {
@@ -47,7 +72,10 @@ pub fn main(init: std.process.Init) !void {
     );
 }
 
+const log = std.log.scoped(.@"examples/websocket");
+
 const std = @import("std");
+
 const zzz = @import("zzz");
 const http = zzz.http;
 const Secsock = zzz.Secsock;

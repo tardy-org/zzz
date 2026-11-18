@@ -3,3 +3,4 @@ zig-pkg/
 .zig-cache/
 perf*.data*
 heaptrack*
+autobahn/reports/
