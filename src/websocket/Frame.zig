@@ -3,21 +3,20 @@ pub const Frame = @This();
 header: Header,
 payload: Payload,
 
+pub const empty: Frame = .{
+    .header = @bitCast(@as(u16, 0)),
+    .payload = .{
+        .extended_len = null,
+        .masking_key = null,
+        .status = null,
+        .data = "",
+    },
+};
+
 pub fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     debug.assert(payload_buf.len <= config.recv_buffer_size.Usize());
 
-    const payload_len, const payload_category = blk: {
-        const size = if (option.opcode == .close)
-            option.message.len + @sizeOf(status.Close)
-        else
-            option.message.len;
-
-        const category: u7 = if (size <= 125)
-            @intCast(size)
-        else if (size < 1024 * 64) 126 else 127;
-
-        break :blk .{ size, category };
-    };
+    const payload_len, const payload_category = lenCategory(option);
 
     debug.assert(payload_buf.len >= payload_len);
 
@@ -62,6 +61,26 @@ pub fn init(payload_buf: []u8, option: Option, config: zzz.Config) Frame {
     };
 }
 
+pub fn apply(response: *Frame, into: Option) !zzz.http.Respond {
+    debug.assert(into.masking_key == null);
+
+    const payload_len, const payload_category = lenCategory(into);
+    response.header.fin = into.fin;
+    response.header.mask = false;
+    response.header.payload_len = payload_category;
+
+    switch (payload_category) {
+        0...125 => {},
+        126 => response.payload.extended_len = .{ .u16 = @intCast(payload_len) },
+        127 => response.payload.extended_len = .{ .u64 = payload_len },
+    }
+    response.header.opcode = into.opcode;
+    response.payload.status = into.status;
+    response.payload.data = into.message;
+
+    return .responding;
+}
+
 pub fn len(frame: *const Frame) usize {
     switch (frame.header.payload_len) {
         0...125 => |len_| return len_,
@@ -70,12 +89,29 @@ pub fn len(frame: *const Frame) usize {
     }
 }
 
+fn lenCategory(option: Option) struct { usize, u7 } {
+    const payload_len, const payload_category = blk: {
+        const size = if (option.opcode == .close)
+            option.message.len + @sizeOf(status.Close)
+        else
+            option.message.len;
+
+        const category: u7 = if (size <= 125)
+            @intCast(size)
+        else if (size < 1024 * 64) 126 else 127;
+
+        break :blk .{ size, category };
+    };
+
+    return .{ payload_len, payload_category };
+}
+
 pub fn format(
     frame: *const Frame,
     w: *std.Io.Writer,
 ) std.Io.Writer.Error!void {
     try w.print("direct: {any}\n", .{frame});
-    const header: [2]u8 = toBytes(@backingInt(frame.header));
+    const header: [2]u8 = toNBO(@backingInt(frame.header));
 
     const hex = struct {
         fn hex(w_: *std.Io.Writer, loads: []const u8) void {
@@ -101,14 +137,14 @@ pub fn format(
             const size = @sizeOf(u16);
             defer index += size;
 
-            const raw = toBytes(frame.payload.extended_len.?.u16);
+            const raw = toNBO(frame.payload.extended_len.?.u16);
             hex(w, raw[0..]);
         },
         127 => {
             const size = @sizeOf(u64);
             defer index += size;
 
-            const raw = toBytes(frame.payload.extended_len.?.u64);
+            const raw = toNBO(frame.payload.extended_len.?.u64);
             hex(w, raw[0..]);
         },
     }
@@ -118,7 +154,7 @@ pub fn format(
         const mask_size = @sizeOf(MaskingKey);
         defer index += mask_size;
 
-        const raw = toBytes(key);
+        const raw = toNBO(key);
         hex(w, raw[0..]);
     }
 
@@ -177,9 +213,9 @@ test format {
     try testing.expectEqualStrings(expected[0..], actual[0..]);
 }
 
-pub fn bytes(frame: *const Frame, buf: []u8) []const u8 {
+pub fn toBytes(frame: *const Frame, buf: []u8) []const u8 {
     const raw = @backingInt(frame.header);
-    const header: [2]u8 = toBytes(raw);
+    const header: [2]u8 = toNBO(raw);
 
     var buf_index: usize = 0;
     // Header
@@ -287,7 +323,7 @@ test text {
         const expected: [7]u8 = .{ 0x81, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f };
 
         var protocol_wire_buf: [expected.len]u8 = undefined;
-        const actual = texting.bytes(&protocol_wire_buf);
+        const actual = texting.toBytes(&protocol_wire_buf);
 
         try testing.expectEqualSlices(u8, expected[0..], actual);
     }
@@ -309,7 +345,7 @@ test text {
         };
 
         var protocol_wire_buf: [expected.len]u8 = undefined;
-        const actual = texting.bytes(&protocol_wire_buf);
+        const actual = texting.toBytes(&protocol_wire_buf);
 
         try testing.expectEqualSlices(u8, expected[0..], actual);
     }
@@ -339,7 +375,7 @@ test ping {
     const expected: [7]u8 = .{ 0x89, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f };
 
     var protocol_wire_buf: [expected.len]u8 = undefined;
-    const actual = pinging.bytes(&protocol_wire_buf);
+    const actual = pinging.toBytes(&protocol_wire_buf);
 
     try testing.expectEqualSlices(u8, expected[0..], actual);
 }
@@ -375,7 +411,7 @@ test pong {
     };
 
     var protocol_wire_buf: [expected.len]u8 = undefined;
-    const actual = pinging.bytes(&protocol_wire_buf);
+    const actual = pinging.toBytes(&protocol_wire_buf);
 
     try testing.expectEqualSlices(u8, expected[0..], actual);
 }
@@ -404,7 +440,7 @@ test binary {
         } ++ msg;
 
         var protocol_wire_buf: [expected.len]u8 = undefined;
-        const actual = binary_frame.bytes(&protocol_wire_buf);
+        const actual = binary_frame.toBytes(&protocol_wire_buf);
 
         try testing.expectEqualSlices(u8, expected[0..], actual);
     }
@@ -422,7 +458,7 @@ test binary {
         } ++ msg;
 
         var protocol_wire_buf: [expected.len]u8 = undefined;
-        const actual = binary_frame.bytes(&protocol_wire_buf);
+        const actual = binary_frame.toBytes(&protocol_wire_buf);
 
         try testing.expectEqualSlices(u8, expected[0..], actual);
     }
@@ -498,7 +534,7 @@ pub const Fragment = struct {
             const expected: [5]u8 = .{ 0x01, 0x03, 0x48, 0x65, 0x6c };
 
             var protocol_wire_buf: [expected.len]u8 = undefined;
-            const actual = frame.bytes(&protocol_wire_buf);
+            const actual = frame.toBytes(&protocol_wire_buf);
 
             try testing.expectEqualSlices(
                 u8,
@@ -519,7 +555,7 @@ pub const Fragment = struct {
             const expected: [4]u8 = .{ 0x00, 0x02, 0x6c, 0x6f };
 
             var protocol_wire_buf: [expected.len]u8 = undefined;
-            const actual = frame.bytes(&protocol_wire_buf);
+            const actual = frame.toBytes(&protocol_wire_buf);
 
             try testing.expectEqualSlices(
                 u8,
@@ -540,7 +576,7 @@ pub const Fragment = struct {
             const expected: [6]u8 = .{ 0x80, 0x04, 0x64, 0x6f, 0x6e, 0x65 };
 
             var protocol_wire_buf: [expected.len]u8 = undefined;
-            const actual = frame.bytes(&protocol_wire_buf);
+            const actual = frame.toBytes(&protocol_wire_buf);
 
             try testing.expectEqualSlices(
                 u8,
@@ -552,7 +588,7 @@ pub const Fragment = struct {
 };
 
 /// Convert `value` to an array of bytes in network bytes ordering
-pub fn toBytes(value: anytype) [@sizeOf(@TypeOf(value))]u8 {
+fn toNBO(value: anytype) [@sizeOf(@TypeOf(value))]u8 {
     const T = @TypeOf(value);
     debug.assert(@typeInfo(T).int.signedness == .unsigned);
     debug.assert(@mod(@typeInfo(T).int.bits, 8) == 0);
@@ -566,7 +602,7 @@ pub fn toBytes(value: anytype) [@sizeOf(@TypeOf(value))]u8 {
 pub fn unmask(buf: []u8, masked_pl: []const u8, key: MaskingKey) []const u8 {
     debug.assert(buf.len >= masked_pl.len);
 
-    const key_bytes: [4]u8 = toBytes(key);
+    const key_bytes: [4]u8 = toNBO(key);
     var transformed: []u8 = buf[0..masked_pl.len];
     for (masked_pl, 0..) |octect, i| {
         const j: usize = @mod(i, 4);
@@ -729,4 +765,5 @@ const testing = std.testing;
 const builtin = @import("builtin");
 
 const zzz = @import("zzz");
+
 const status = @import("status.zig");

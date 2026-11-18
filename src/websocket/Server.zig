@@ -131,410 +131,68 @@ pub fn mainLoop(
     var state: State = .handshake;
     ws_loop: switch (state) {
         .handshake => {
-            const handshake_buf = try provision.zc_recv_buffer.get_write_area(
-                rt.gpa,
-                config.recv_buffer_size.Usize(),
-            );
-
-            const byte_count = secure.recv(
+            state = try loop.handshake(
                 rt,
-                handshake_buf,
-            ) catch |e| switch (e) {
-                error.Closed => break :ws_loop,
-                else => |err| {
-                    log.err(
-                        "handshake recv failed on socket | {t}",
-                        .{err},
-                    );
-                    break :ws_loop;
-                },
-            };
-            provision.zc_recv_buffer.mark_written(byte_count);
-
-            if (provision.zc_recv_buffer.len() > config.request_size_max.Usize())
-                break :ws_loop;
-
-            const end_marker = "\r\n\r\n";
-            if (!mem.endsWith(
-                u8,
-                handshake_buf[0..byte_count],
-                end_marker,
-            )) {
-                const respond = try provision.response.apply(.{
-                    .status = .@"Bad Request",
-                    .mime = .TEXT,
-                    .body = "Check if using https/http incorrectly in the request.\n",
-                });
-                state = .{ .next_respond = respond };
-                continue :ws_loop state;
-            }
-
-            try provision.request.parse(
-                rt.gpa,
-                handshake_buf[0..byte_count],
-                .{
-                    .request_bytes_max = config.request_size_max,
-                    .request_uri_bytes_max = config.request_uri_size_max,
-                },
+                &secure,
+                provision,
+                config,
             );
-
-            debug.assert(mem.findScalar(
-                u8,
-                provision.request.uri.?,
-                '#',
-            ) == null);
-
-            debug.assert(provision.request.method.? == .GET);
-
-            const upgrade = provision.request.headers.get("Upgrade").?;
-            debug.assert(
-                mem.eql(u8, upgrade, "websocket") or
-                    mem.eql(u8, upgrade, "WebSocket"),
-            );
-
-            debug.assert(mem.eql(
-                u8,
-                provision.request.headers.get("Connection").?,
-                "Upgrade",
-            ));
-            debug.assert((std.fmt.parseInt(
-                u32,
-                provision.request.headers.get("Sec-WebSocket-Version").?,
-                10,
-            ) catch unreachable) == protocal_version);
-
-            if (provision.request.headers.get(
-                "Sec-WebSocket-Protocol",
-            )) |protocals| {
-                var itr = mem.tokenizeScalar(
-                    u8,
-                    protocals,
-                    ',',
-                );
-                while (itr.next()) |protocal| {
-                    debug.assert(protocal.len != 0);
-                    try provision.protocals.putNoClobber(
-                        rt.gpa,
-                        protocal,
-                        {},
-                    );
-                }
-            }
-
-            if (provision.request.headers.get(
-                "Sec-WebSocket-Extensions",
-            )) |extensions| {
-                var itr = mem.tokenizeScalar(
-                    u8,
-                    extensions,
-                    ';',
-                );
-                while (itr.next()) |extension| {
-                    debug.assert(extension.len != 0);
-                    try provision.extensions.putNoClobber(
-                        rt.gpa,
-                        extension,
-                        {},
-                    );
-                }
-            }
-
-            log.info("rt{d} - '{t} {s}' - {s} - ({s})", .{
-                rt.id,
-                provision.request.method.?,
-                provision.request.uri.?,
-                provision.request.headers.get("User-Agent") orelse "N/A",
-                secure_info.address,
-            });
-
-            // Prepare Server Responses
-            provision.response.status = .@"Switching Protocols";
-            provision.response.headers.putAssumeCapacityNoClobber(
-                "Upgrade",
-                provision.request.headers.get("Upgrade").?,
-            );
-            provision.response.headers.putAssumeCapacityNoClobber(
-                "Connection",
-                provision.request.headers.get("Connection").?,
-            );
-
-            // TODO: protocal selection should be based on the servers support
-            if (provision.protocals.count() != 0)
-                provision.response.headers.putAssumeCapacityNoClobber(
-                    "Sec-WebSocket-Protocol",
-                    provision.protocals.keys()[0],
-                );
-
-            const handshake_accept_key = handshake.acceptKey(
-                rt.gpa,
-                provision.request.headers.get("Sec-WebSocket-Key").?,
-            );
-
-            provision.response.headers.putAssumeCapacityNoClobber(
-                "Sec-WebSocket-Accept",
-                handshake_accept_key[0..],
-            );
-
-            try provision.response.writeHeaders(
-                &provision.header_writer,
-                null,
-            );
-            const headers = provision.header_writer.buffered();
-
-            const sent_length = secure.send_all(
-                rt,
-                headers,
-            ) catch |err| {
-                log.err("handshake: send failed on socket | {t}", .{err});
-                break :ws_loop;
-            };
-            if (sent_length != headers.len) break :ws_loop;
-
-            state = .{ .communication = .receive };
             continue :ws_loop state;
         },
+        .handler => {
+            const frame = request.start(
+                &secure,
+                rt,
+                &provision.zc_recv_buffer,
+                config,
+            );
+            provision.request = frame;
+
+            state = try loop.handler(
+                rt,
+                router,
+                &secure,
+                provision,
+            );
+            continue :ws_loop state;
+        },
+        .respond => |respond| {
+            state = try loop.response(
+                rt,
+                &secure,
+                provision,
+                config,
+                respond,
+            );
+            switch (respond) {
+                .close => break :ws_loop,
+                else => continue :ws_loop state,
+            }
+        },
+        .communication => {
+            const frame = request.next(
+                &secure,
+                rt,
+                &provision.zc_recv_buffer,
+                config,
+            ) orelse break :ws_loop;
+
+            provision.request = frame;
+            state = try loop.handler(
+                rt,
+                router,
+                &secure,
+                provision,
+            );
+            continue :ws_loop state;
+        },
+        // TODO: how show I handle .next_request
         .next_request => {
             clearProvision(rt.gpa, provision, config);
 
             state = .handshake;
             continue :ws_loop state;
         },
-        .communication => |communication| {
-            switch (communication) {
-                else => {},
-                .fragment => |fragment| {
-                    debug.assert(fragment.header.isStart());
-
-                    const arena = provision.arena.allocator();
-                    var frames: std.ArrayList(Frame) = try .initCapacity(
-                        arena,
-                        24,
-                    );
-                    defer frames.deinit(arena);
-
-                    try frames.append(arena, fragment);
-
-                    while (Receive.next(
-                        &secure,
-                        rt,
-                        &provision.zc_recv_buffer,
-                        config,
-                    )) |next| {
-                        debug.assert(next.header.isContinue() or next.header.isEnd());
-
-                        if (next.header.isControl()) debug.panic(
-                            "TODO: handle when it isn't a control frame",
-                            .{},
-                        );
-
-                        try frames.append(arena, next);
-                    }
-
-                    var payload: std.ArrayList([]const u8) = .empty;
-                    for (frames.items) |frame|
-                        try payload.append(arena, frame.payload.data);
-
-                    const payload_data = try mem.concat(
-                        arena,
-                        u8,
-                        payload.items,
-                    );
-
-                    const frame: Frame = .init(
-                        payload_data,
-                        .{
-                            .fin = true,
-                            .opcode = fragment.header.opcode,
-                            .message = payload_data,
-                        },
-                        .{},
-                    );
-                    _ = frame;
-                },
-                .receive => {
-                    const new_frame = Receive.first(
-                        &secure,
-                        rt,
-                        &provision.zc_recv_buffer,
-                        config,
-                    );
-
-                    const is_fragment = new_frame.header.isFragment();
-                    if (is_fragment) {
-                        state = .{
-                            .communication = .{
-                                .fragment = new_frame,
-                            },
-                        };
-                    } else switch (new_frame.header.opcode) {
-                        else => {},
-                        .close => {
-                            state = .{
-                                .communication = .{
-                                    .close = new_frame,
-                                },
-                            };
-                        },
-                        .text => {
-                            state = .{
-                                .communication = .{
-                                    .text = new_frame,
-                                },
-                            };
-                        },
-                        .ping => {
-                            state = .{
-                                .communication = .{
-                                    .pong = new_frame,
-                                },
-                            };
-                        },
-                        .pong => {
-                            state = .{
-                                .communication = .{
-                                    .ping = new_frame,
-                                },
-                            };
-                        },
-                    }
-                    continue :ws_loop state;
-                },
-                .text => |text| {
-                    const protocol_buf =
-                        try provision.zc_recv_buffer.get_write_area(
-                            rt.gpa,
-                            config.recv_buffer_size.Usize(),
-                        );
-                    const new_text = Frame.text(
-                        protocol_buf,
-                        text.payload.data,
-                        .{},
-                    );
-
-                    log.debug("Frame {f}", .{new_text});
-
-                    const protocol_bytes: []const u8 = new_text.bytes(
-                        protocol_buf[new_text.len()..],
-                    );
-
-                    const sent_length = secure.send_all(
-                        rt,
-                        protocol_bytes,
-                    ) catch |err| {
-                        log.err("text: send failed on socket | {t}", .{err});
-                        break :ws_loop;
-                    };
-                    defer provision.zc_recv_buffer.mark_written(sent_length);
-
-                    if (sent_length != protocol_bytes.len) {
-                        log.warn(
-                            "text sent {d} but was expected to send {d}",
-                            .{ sent_length, protocol_bytes.len },
-                        );
-                        break :ws_loop;
-                    }
-
-                    state = .{ .communication = .receive };
-                    continue :ws_loop state;
-                },
-                .ping => |ping| {
-                    const protocol_buf =
-                        try provision.zc_recv_buffer.get_write_area(
-                            rt.gpa,
-                            Frame.Opcode.control_frame_payload_size_max,
-                        );
-                    const protocol_bytes: []const u8 = ping.bytes(protocol_buf);
-
-                    const sent_length = secure.send_all(
-                        rt,
-                        protocol_bytes,
-                    ) catch |err| {
-                        log.err("ping: send failed on socket | {t}", .{err});
-                        break :ws_loop;
-                    };
-                    defer provision.zc_recv_buffer.mark_written(sent_length);
-
-                    if (sent_length != protocol_bytes.len) {
-                        log.warn(
-                            "ping sent {d} but was expected to send {d}",
-                            .{ sent_length, protocol_bytes.len },
-                        );
-                        break :ws_loop;
-                    }
-
-                    state = .{ .communication = .receive };
-                    continue :ws_loop state;
-                },
-                .pong => |ping| {
-                    var pong = ping;
-                    pong.header.opcode = .pong;
-
-                    const protocol_buf =
-                        try provision.zc_recv_buffer.get_write_area(
-                            rt.gpa,
-                            Frame.Opcode.control_frame_payload_size_max,
-                        );
-                    const protocol_bytes: []const u8 = pong.bytes(protocol_buf);
-
-                    const sent_length = secure.send_all(
-                        rt,
-                        protocol_bytes,
-                    ) catch |err| {
-                        log.err("pong: send failed on socket | {t}", .{err});
-                        break :ws_loop;
-                    };
-                    defer provision.zc_recv_buffer.mark_written(sent_length);
-
-                    if (sent_length != protocol_bytes.len) {
-                        log.warn(
-                            "pong sent {d} but was expected to send {d}",
-                            .{ sent_length, protocol_bytes.len },
-                        );
-                        break :ws_loop;
-                    }
-
-                    state = .{ .communication = .receive };
-                    continue :ws_loop state;
-                },
-                .close => |frame| {
-                    const close_buf = try provision.zc_recv_buffer.get_write_area(
-                        rt.gpa,
-                        Frame.Opcode.control_frame_payload_size_max,
-                    );
-                    log.info("close data is {s}", .{frame.payload.data});
-
-                    const close = Frame.close(
-                        close_buf,
-                        .@"Normal Closure",
-                        frame.payload.data,
-                    );
-                    provision.zc_recv_buffer.mark_written(close.len());
-
-                    const protocol_buf = try provision.zc_recv_buffer.get_write_area(
-                        rt.gpa,
-                        Frame.Opcode.control_frame_payload_size_max,
-                    );
-                    const protocol_bytes = close.bytes(protocol_buf);
-
-                    const sent_length = secure.send_all(
-                        rt,
-                        protocol_bytes,
-                    ) catch |err| {
-                        log.err("close: send failed on socket | {t}", .{err});
-                        break :ws_loop;
-                    };
-                    provision.zc_recv_buffer.mark_written(sent_length);
-
-                    if (sent_length != protocol_bytes.len) log.warn(
-                        "close sent {d} but was expected to send {d}",
-                        .{ sent_length, protocol_bytes.len },
-                    );
-
-                    break :ws_loop;
-                },
-            }
-        },
-        else => {},
     }
 
     log.info("connection ({s}) closed", .{secure_info.address});
@@ -570,17 +228,21 @@ fn initProvision(
     provision.protocals = .empty;
     provision.extensions = .empty;
 
-    provision.request = try .init(
-        gpa,
-        config.header_fields_count_max,
-    );
-    errdefer provision.request.deinit(gpa);
+    provision.request = .empty;
+    provision.response = .empty;
 
-    provision.response = try .init(
+    // TODO: dupe needed data so `handshake` isn't keep around
+    provision.handshake.request = try .init(
         gpa,
         config.header_fields_count_max,
     );
-    errdefer provision.response.deinit(gpa);
+    errdefer provision.handshake.request.deinit(gpa);
+
+    provision.handshake.response = try .init(
+        gpa,
+        config.header_fields_count_max,
+    );
+    errdefer provision.handshake.response.deinit(gpa);
 
     provision.zc_recv_buffer = try .init(
         gpa,
@@ -606,8 +268,8 @@ fn initProvision(
 
 fn clearProvision(gpa: mem.Allocator, provision: *Provision, config: zzz.Config) void {
     debug.assert(provision.initalized);
-    provision.request.clear(gpa);
-    provision.response.clear();
+    provision.handshake.request.clear(gpa);
+    provision.handshake.response.clear();
     provision.storage.clear(gpa);
     provision.protocals.clearRetainingCapacity();
     provision.extensions.clearRetainingCapacity();
@@ -619,13 +281,13 @@ fn clearProvision(gpa: mem.Allocator, provision: *Provision, config: zzz.Config)
         .{ .retain_capacity = {} });
 }
 
-const State = union(enum) {
+pub const State = union(enum) {
     handshake,
     handler,
     // two-way communication channel
     communication: Communication,
+    respond: http.Respond,
     next_request,
-    next_respond: http.Respond,
 };
 
 const Communication = union(enum) {
@@ -648,8 +310,12 @@ pub const Provision = struct {
     captures: []Trie.Capture,
     storage: zcore.Storage,
     queries: http.Queries,
-    request: http.Request,
-    response: http.Response,
+    handshake: struct {
+        request: http.Request,
+        response: http.Response,
+    },
+    request: Frame,
+    response: Frame,
     /// ordered set of acceptable subprotocol by preference from client
     protocals: Set,
     /// ordered set of extensions
@@ -657,9 +323,6 @@ pub const Provision = struct {
 
     const Set = std.StringArrayHashMapUnmanaged(void);
 };
-
-/// WebSocket protocal version
-const protocal_version = 13;
 
 const endian = builtin.target.cpu.arch.endian();
 const log = std.log.scoped(.@"zzz/websocket/Server");
@@ -691,5 +354,5 @@ const Middleware = Router.Middleware;
 const Trie = Router.Trie;
 
 const Frame = @import("Frame.zig");
-const handshake = @import("handshake.zig");
-const Receive = @import("Receive.zig");
+const loop = @import("loop.zig");
+const request = @import("request.zig");
