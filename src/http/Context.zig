@@ -8,6 +8,10 @@ runtime: *Runtime,
 /// The Request that triggered this handler.
 request: *const http.Request,
 response: *http.Response,
+websocket: ?struct {
+    request: *const zzz.websocket.Frame,
+    response: *zzz.websocket.Frame,
+},
 /// Storage
 storage: *core.Storage,
 /// TCP Socket for this Connection.

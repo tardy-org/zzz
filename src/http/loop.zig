@@ -105,7 +105,10 @@ pub fn request(
             ) catch |e| switch (e) {
                 error.Closed => return .{ .respond = .close },
                 else => |err| {
-                    log.err("request=>body: recv failed on socket | {t}", .{err});
+                    log.err(
+                        "request=>body: recv failed on socket | {t}",
+                        .{err},
+                    );
                     return .{ .respond = .close };
                 },
             };

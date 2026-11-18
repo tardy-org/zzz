@@ -64,7 +64,12 @@ pub fn writeHeaders(
     );
 
     // Headers
-    try writer.writeAll("Server: Zzz\r\nConnection: keep-alive\r\n");
+    try writer.writeAll("Server: Zzz\r\n");
+
+    if (response.status != .@"Switching Protocols") {
+        try writer.writeAll("Connection: keep-alive\r\n");
+    }
+
     var iter = response.headers.iterator();
     while (iter.next()) |entry| try writer.print(
         "{s}: {s}\r\n",
